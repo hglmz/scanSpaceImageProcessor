@@ -6,20 +6,20 @@ A Qt/PySide6 desktop application for automated Xrite/Calibrite colour checker ca
 
 ## Features
 
-- **Automatic Chart Detection**  
+ **Automatic Chart Detection**  
   Detects X-Rite ColorChecker swatches in an image and extracts mean patch colours.
-- Uses the brilliant Colour Checker detection from KelSolaar
-- https://github.com/colour-science/colour-checker-detection
+  Uses the brilliant Colour Checker detection from KelSolaar
+  https://github.com/colour-science/colour-checker-detection
 
-- **Manual Chart Selection & Flatten**  
-  • Draw a crop box around the chart  
-  • Click its four corners to warp/flatten perspective  
-  • Extract swatches precisely, even on angled shots
+ **Manual Chart Selection & Flatten**  
+  - Draw a crop box around the chart  
+  - Click its four corners to warp/flatten perspective  
+  - Extract swatches precisely, even on angled shots
 
-- **Batch Colour Correction**  
+**Batch Colour Correction**  
   Apply a reference chart profile to an entire folder of RAW images, in parallel.
 
-- **Formats & Bit-Depth**  
+**Formats & Bit-Depth**  
   Imports the following formats:
   - **.nef** Nikon .NEF raw Format
   - **.cr2** Canon CR2 Raw Format
@@ -33,14 +33,14 @@ A Qt/PySide6 desktop application for automated Xrite/Calibrite colour checker ca
   - **TIFF** (`.tiff`), 8-bit or 16-bit  
   - **OpenEXR** (`.exr`) in any OIIO-supported colourspace, float
 
-- **Metadata Preservation**  
+**Metadata Preservation**  
   Carries over all original EXIF metadata into your output files.
 
-- **Exposure Normalization**  
+**Exposure Normalization**  
   Compute and apply average-exposure multipliers across your dataset, with hot-spot/shadow clipping.
-  - Useful for datasets shot outdoors or using a flash from varying distances
+  Useful for datasets shot outdoors or using a flash from varying distances
 
-- **Debug Overlays**  
+**Debug Overlays**  
   Preview intermediate results:  
   - Corrected patch image  
   - Swatch overlay  
@@ -49,7 +49,7 @@ A Qt/PySide6 desktop application for automated Xrite/Calibrite colour checker ca
 
 ---
 
-## 📦 Installation
+## Installation
 
 - Requires Python 3.10
 
