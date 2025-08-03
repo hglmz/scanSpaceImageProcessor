@@ -1,0 +1,14 @@
+PySide6~=6.5.1.1
+opencv-python~=4.10.0.84
+numpy~=1.26.4
+rawpy~=0.22.0
+imageio~=2.31.6
+psutil~=5.9.5
+Pillow~=10.0.1
+sympy~=1.13.0
+colour-science~=0.4.6
+colour-checker-detection~=0.2.1
+colour-segmentation~=1.9
+ExifRead~=3.0.0
+imageio~=2.31.6
+oiio-python~=3.0.8.1.1

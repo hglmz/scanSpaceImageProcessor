@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 # To install dependencies, run:
 #   pip install colour-checker-detection psutil pillow
-
+import functools
 import os
+import shutil
+import subprocess
 import time
 
 import cv2
@@ -13,7 +15,10 @@ import imageio
 import colour
 import psutil
 import tempfile
+from OpenImageIO import ImageBuf, ImageBufAlgo, ImageSpec, ImageOutput, TypeFloat, ColorConfig, ROI, ImageInput, \
+    TypeDesc
 from PIL import Image
+from colour.models import RGB_COLOURSPACES
 from colour_checker_detection import (
     SETTINGS_SEGMENTATION_COLORCHECKER_CLASSIC,
     detect_colour_checkers_segmentation)
@@ -21,22 +26,36 @@ from colour_checker_detection import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QListWidgetItem,
     QGraphicsScene, QGraphicsPixmapItem, QProgressBar, QGraphicsTextItem, QLabel, QRubberBand, QGraphicsEllipseItem,
-    QPushButton, QRadioButton, QButtonGroup, QHBoxLayout, QSizePolicy, QWidget, QGraphicsRectItem
+    QPushButton, QRadioButton, QButtonGroup, QHBoxLayout, QSizePolicy, QWidget, QGraphicsRectItem, QMessageBox
 )
 from PySide6.QtCore import (
-    QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, QSize
+    QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, QSize, QEventLoop
 )
 from PySide6.QtGui import QColor, QPixmap, QImage, QPainter, QIcon
 from sympy.codegen.ast import continue_
+from tifffile import tifffile
 
 from scanspaceImageProcessor_UI import Ui_MainWindow
 
 # Code to get taskbar icon visible
 import ctypes
-scanSpaceImageProcessor = u'mycompany.myproduct.subproduct.version' # arbitrary string
+scanSpaceImageProcessor = u'mycompany.myproduct.subproduct.version' # arbitrary string to trick windows
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(scanSpaceImageProcessor)
 
+# supported file formats
 RAW_EXTENSIONS = ('.nef', '.cr2', '.cr3', '.dng', '.arw', '.raw')
+OUTPUT_FORMATS = ('.jpg', '.png', '.tiff', '.exr')
+
+reference = colour.CCS_COLOURCHECKERS['ColorChecker24 - After November 2014']
+illuminant_XYZ = colour.xy_to_XYZ(reference.illuminant)
+
+reference_swatches = colour.XYZ_to_RGB(
+    colour.xyY_to_XYZ(list(reference.data.values())),
+    RGB_COLOURSPACES['sRGB'],
+    illuminant=reference.illuminant,           # a 2-tuple (x, y)
+    chromatic_adaptation_transform="CAT02",
+    apply_cctf_encoding=False,
+)
 
 class WorkerSignals(QObject):
     log = Signal(str)
@@ -77,15 +96,102 @@ class FixedSizeEllipse(QGraphicsEllipseItem):
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(self.rect())
 
+class SwatchPreviewSignals(QObject):
+    """Worker signals for previewing manual swatch correction."""
+    finished = Signal(np.ndarray)       # Emits the corrected uint8 array
+    error    = Signal(str)              # Emits an error message on failure
+
+class SwatchPreviewWorker(QRunnable):
+    """
+    Runs colour correction + CCTF encoding in a background thread.
+    Emits the final uint8 image array when done.
+    """
+    def __init__(self, img_fp, swatch_colours, reference_swatches):
+        super().__init__()
+        self.img_fp            = img_fp
+        self.swatch_colours    = swatch_colours
+        self.reference_swatches= reference_swatches
+        self.signals           = SwatchPreviewSignals()
+
+    def run(self):
+        try:
+            # 1) Colour‐correct
+            corrected = colour.colour_correction(
+                self.img_fp,
+                self.swatch_colours,
+                self.reference_swatches
+            )
+            corrected = np.clip(corrected, 0, 1)
+
+            # 2) Apply CCTF & convert to uint8
+            corrected_uint8 = np.uint8(255 * colour.cctf_encoding(corrected))
+
+            # 3) Emit the raw array back to the main thread
+            self.signals.finished.emit(corrected_uint8)
+
+        except Exception as e:
+            self.signals.error.emit(str(e))
+
+
+class RawLoadSignals(QObject):
+    loaded = Signal(np.ndarray)
+    error  = Signal(str)
+
+
+class RawLoadWorker(QRunnable):
+    """
+    Loads a RAW file in a background thread and emits only the full-precision
+    float32 image array.
+    """
+    def __init__(self, path: str):
+        super().__init__()
+        self.path    = path
+        self.signals = RawLoadSignals()
+
+    def run(self):
+        try:
+            with rawpy.imread(self.path) as raw:
+                common = dict(
+                    gamma=(1,1),
+                    no_auto_bright=True,
+                    use_camera_wb=True,
+                    output_color=rawpy.ColorSpace.sRGB
+                )
+                # Only full-precision pipeline
+                rgb_full = raw.postprocess(output_bps=16, **common)
+                full_fp  = np.array(rgb_full, dtype=np.float32) / 65535.0
+
+            # Emit just the float32 array
+            self.signals.loaded.emit(full_fp)
+
+        except Exception as e:
+            self.signals.error.emit(str(e))
+
+
+def exit_manual_mode(func):
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # self.log(f"[exit_manual_mode] ENTRY: {func.__name__}, manual_selection_mode={self.manual_selection_mode}")
+        if self.manual_selection_mode:
+            self.finalize_manual_chart_selection(canceled=True)
+        result = func(self, *args, **kwargs)
+        # self.log(f"[exit_manual_mode]  EXIT: {func.__name__}")
+        return result
+    return wrapper
+
 class ImageCorrectionWorker(QRunnable):
     def __init__(self, images, swatches, output_folder, signals, jpeg_quality,
-                 rename_map=None, name_base='', padding=0, export_masked=False):
+                 rename_map=None, name_base='', padding=0, export_masked=False,
+                 output_format: str = '.jpg', tiff_bitdepth=8, exr_colorspace: str | None = None):
         super().__init__()
         self.images = images
         self.swatches = swatches
         self.output_folder = output_folder
         self.signals = signals
         self.jpeg_quality = jpeg_quality
+        self.output_format = output_format
+        self.tiff_bitdepth = tiff_bitdepth
+        self.exr_colorspace = exr_colorspace
         # File renaming support
         self.rename_map = rename_map or {}
         self.name_base = name_base
@@ -98,13 +204,8 @@ class ImageCorrectionWorker(QRunnable):
 
     def run(self):
         os.makedirs(self.output_folder, exist_ok=True)
-        D65 = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D65']
-        reference = colour.CCS_COLOURCHECKERS['ColorChecker24 - After November 2014']
-        ref_swatches = colour.XYZ_to_RGB(
-            colour.xyY_to_XYZ(list(reference.data.values())),
-            reference.illuminant, D65,
-            colour.RGB_COLOURSPACES['sRGB'].matrix_XYZ_to_RGB
-        )
+        ext = self.output_format
+
         for img_path in self.images:
             local_timer_start = time.time()
 
@@ -112,13 +213,13 @@ class ImageCorrectionWorker(QRunnable):
             out_fn = None
             if getattr(self, "use_original_filenames", False):
                 # Use original filename with .jpg extension
-                out_fn = os.path.splitext(os.path.basename(img_path))[0] + '.jpg'
+                out_fn = os.path.splitext(os.path.basename(img_path))[0] + self.output_format
             else:
                 seq = self.rename_map.get(img_path)
                 if seq is not None and self.name_base:
-                    out_fn = f"{self.name_base}_{seq:0{self.padding}d}.jpg"
+                    out_fn = f"{self.name_base}_{seq:0{self.padding}d}{self.output_format}"
                 else:
-                    out_fn = os.path.splitext(os.path.basename(img_path))[0] + '.jpg'
+                    out_fn = os.path.splitext(os.path.basename(img_path))[0] + self.output_format
             out_path = os.path.join(self.output_folder, out_fn)
 
             # send start signal
@@ -137,19 +238,30 @@ class ImageCorrectionWorker(QRunnable):
                     img_arr = np.array(rgb, dtype=np.float32) / 65535.0
             except Exception as e:
                 self.signals.log.emit(f"[Image Load Error] {img_path}: {e}")
-                self.signals.status.emit(img_path, 'error')
+                self.signals.status.emit(
+                    img_path,
+                    'error',
+                    time.time() - local_timer_start,
+                    out_path
+                )
                 continue
 
             # Check cancel before processing
             if self.cancelled:
-                self.images = []  # clear the image list
-                self.signals.log.emit("[Worker] Cancelled by user during processing. Exiting thread.")
-                self.signals.status.emit(img_path, 'cancelled')
+                self.signals.log.emit("[Worker] Cancelled by user. Exiting thread.")
+                self.signals.status.emit(
+                    img_path,
+                    'cancelled',
+                    time.time() - local_timer_start,
+                    out_path
+                )
                 return
 
             
             try:
-                corrected = colour.colour_correction(img_arr, self.swatches, ref_swatches)
+                corrected = colour.colour_correction(img_arr, self.swatches, reference_swatches)
+
+                # Average brightness correction if flag is set
                 multiplier = 1.0
                 if hasattr(self, "image_metadata_map"):
                     meta = self.image_metadata_map.get(img_path)
@@ -158,14 +270,12 @@ class ImageCorrectionWorker(QRunnable):
                         try:
                             multiplier = float(value)
                         except (TypeError, ValueError):
-                            print("no multiplier found")
                             multiplier = 1.0
                 img_arr = corrected * multiplier
 
                 corrected = np.clip(img_arr, 0, 1)
 
                 # Export the masked images if flag is set
-
                 if getattr(self, "export_masked", False):
                     lum = 0.2126 * corrected[:, :, 0] + 0.7152 * corrected[:, :, 1] + 0.0722 * corrected[:, :, 2]
                     shadow_limit = getattr(self, "shadow_limit", 0.05)
@@ -191,40 +301,144 @@ class ImageCorrectionWorker(QRunnable):
                         f"with limits shadow<={shadow_limit:.2f}, highlight>={highlight_limit:.2f}"
                     )
 
-                corrected_uint8 = np.uint8(255 * colour.cctf_encoding(corrected))
-                imageio.imwrite(out_path, corrected_uint8, quality=self.jpeg_quality)
+                if ext in ('.png', '.jpg', '.jpeg'):
+                    # Always 8-bit
+                    corrected_uint8 = np.uint8(255 * colour.cctf_encoding(corrected))
+                    imageio.imwrite(out_path, corrected_uint8, quality=self.jpeg_quality)
+
+                elif ext == '.tiff':
+                    float16 = colour.cctf_encoding(corrected)
+                    if self.tiff_bitdepth == 16:
+                        image16 = np.uint16(np.clip(float16 * 65535.0, 0, 65535))
+                        with tifffile.TiffWriter(out_path) as tiff_writer:
+                            tiff_writer.write(image16)
+                        corrected_uint8 = np.uint8(np.clip(float16 * 255.0, 0, 255))
+                    else:
+                        image8 = np.uint8(np.clip(float16 * 255.0, 0, 255))
+                        with tifffile.TiffWriter(out_path) as tiff_writer:
+                            tiff_writer.write(image8)
+                        corrected_uint8 = image8
+
+
+                elif ext == '.exr':
+                    # Write a temp EXR tagged as sRGB
+                    h, w, c = corrected.shape
+                    fd, temp_exr = tempfile.mkstemp(suffix=".exr")
+                    os.close(fd)
+                    spec = ImageSpec(w, h, 3, TypeFloat)
+                    spec.attribute("oiio:ColorSpace", "sRGB")
+                    out = ImageOutput.create(temp_exr)
+                    out.open(temp_exr, spec)
+                    out.write_image(corrected.flatten())
+                    out.close()
+                    print(f"[EXR DEBUG] temp EXR written at {temp_exr}", flush=True)
+
+                    # Load it via ImageBuf & colorconvert
+                    buf_in = ImageBuf(temp_exr)
+                    buf_out = ImageBufAlgo.colorconvert(buf_in, "sRGB", self.exr_colorspace)
+                    print(f"[EXR DEBUG] colorconvert done → {self.exr_colorspace}", flush=True)
+
+                    # Write the final EXR in the target space
+                    buf_out.write(out_path)
+                    print(f"[EXR DEBUG] final EXR written at {out_path}", flush=True)
+
+                    corrected_uint8 = np.uint8(np.clip(corrected * 255.0, 0, 255))
+                    # Remove the temp file
+                    try:
+                        os.remove(temp_exr)
+                    except OSError:
+                        pass
 
                 self.signals.log.emit(f"[Saved] {out_path}")
+
+                # ─── Copy ALL metadata from RAW → output via OIIO ────────────────────
+                in_img = ImageInput.open(img_path)
+                if in_img:
+                    src_pvs = in_img.spec().extra_attribs  # ParamValueList of all tags
+                    in_img.close()
+                    print(f"[Metadata] Read {len(src_pvs)} tags from {img_path}", flush=True)
+                else:
+                    src_pvs = []
+                    print(f"[Metadata ERROR] Could not read metadata from {img_path}", flush=True)
+
+                # Get or build an ImageSpec for the file you just wrote
+                out_reader = ImageInput.open(out_path)
+                if out_reader:
+                    out_spec = out_reader.spec()
+                    out_reader.close()
+                else:
+                    if ext == '.exr' or ext == '.tiff':
+                        h, w, c = corrected.shape
+                        out_spec = ImageSpec(w, h, c, TypeFloat)
+                    else:
+                        h, w = corrected_uint8.shape[:2]
+                        channels = corrected_uint8.shape[2] if corrected_uint8.ndim == 3 else 1
+                        out_spec = ImageSpec(w, h, channels, TypeDesc.UINT8)
+
+                # Inject every tag into the output spec
+                for pv in src_pvs:
+                    name = pv.name
+                    val = pv.value
+                    if isinstance(val, (int, float, str)):
+                        out_spec.attribute(name, val)
+                    else:
+                        out_spec.attribute(name, str(val))
+                print(f"[Metadata] Injected {len(src_pvs)} tags into spec for {out_path}", flush=True)
+
+                # Rewrite the file in-place so it carries those tags
+                writer = ImageOutput.create(out_path)
+                if not writer:
+                    print(f"[Metadata ERROR] Could not open writer for {out_path}", flush=True)
+                else:
+                    writer.open(out_path, out_spec)
+                    if ext == '.exr':
+                        pixels = buf_out.get_pixels(TypeFloat)
+                    else:
+                        pixels = corrected_uint8.flatten()
+                    writer.write_image(pixels)
+                    writer.close()
+                    print(f"[Metadata] Wrote {out_path} with embedded metadata", flush=True)
+
                 # emit an array directly for preview
                 data = [corrected_uint8, out_path]
                 self.signals.preview.emit(data)
                 self.signals.status.emit(img_path, 'finished', (time.time() - local_timer_start), out_path)
 
+
             except Exception as e:
                 self.signals.log.emit(f"[Processing Error] {img_path}: {e}")
-                self.signals.status.emit(img_path, 'error')
+                self.signals.status.emit(
+                    img_path,
+                    'error',
+                    time.time() - local_timer_start,
+                    out_path
+                )
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # ────────────────────────────────────────────────────────────
+        # 1) UI Setup
+        # ────────────────────────────────────────────────────────────
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+
+        # Thread pool for background tasks
         self.threadpool = QThreadPool()
+
+        # ────────────────────────────────────────────────────────────
+        # 2) Application Icon & Settings
+        # ────────────────────────────────────────────────────────────
         self.settings = QSettings('scanSpace', 'ImageProcessor')
-        icon_path = ("./resources/scanSpaceLogo_256px.ico")
-
+        icon_path = "./resources/scanSpaceLogo_256px.ico"
         if os.path.exists(icon_path):
-            pixmap = QPixmap(str(icon_path))
-            app_icon = QIcon(pixmap)
-            self.setWindowIcon(app_icon)
-
+            pixmap = QPixmap(icon_path)
+            self.setWindowIcon(QIcon(pixmap))
         else:
             print(f"Icon file not found at: {icon_path}")
 
-        # Metadata format is: Raw Image Path (Path), Processed Output Path (Path), Processing Status (str), Calibration File (Path), Datatype (Str), Colour Chart (bool)
-        # Metadata is stored per-image in the imageListWidget.
-
-        # Restore last-used paths
+        # Restore last-used folders
         rawf = self.settings.value('rawFolder', '')
         outf = self.settings.value('outputFolder', '')
         if rawf:
@@ -232,110 +446,175 @@ class MainWindow(QMainWindow):
         if outf:
             self.ui.outputDirectoryLineEdit.setText(outf)
 
-        # Preview scene
+        # ────────────────────────────────────────────────────────────
+        # 3) Preview Scene
+        # ────────────────────────────────────────────────────────────
         self.previewScene = QGraphicsScene(self)
-        self.ui.imagePreviewGraphicsView.setScene(self.previewScene)
-        self.ui.imagePreviewGraphicsView.setRenderHint(QPainter.SmoothPixmapTransform)
+        view = self.ui.imagePreviewGraphicsView
+        view.setScene(self.previewScene)
+        view.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # Hide the detect chart controls by default
+        # ────────────────────────────────────────────────────────────
+        # 4) Default UI State
+        # ────────────────────────────────────────────────────────────
+        # Hide chart tools until needed
         self.ui.detectChartToolshelfFrame.setVisible(False)
-        # Disable flatten button until a crop region is selected
-        self.ui.flattenChartImagePushButton.setEnabled(False)
-        self.ui.finalizeChartPushbutton.setEnabled(False)
+        self.ui.colourChartDebugToolsFrame.setVisible(False)  # via setup_debug_views()
+        self.ui.processingStatusBarFrame.setVisible(False) # hide our processing status bar
 
-        # Hide chart debug tools
+        # Disable buttons until prerequisites are met
+        for btn in (
+            self.ui.manuallySelectChartPushbutton,
+            self.ui.detectChartShelfPushbutton,
+            self.ui.showOriginalImagePushbutton,
+            self.ui.flattenChartImagePushButton,
+            self.ui.previewChartPushbutton,
+            self.ui.finalizeChartPushbutton
+        ):
+            btn.setEnabled(False)
+
+        # Initialize debug‐view toggles
         self.setup_debug_views()
-        self.ui.colourChartDebugToolsFrame.setVisible(False)
 
-        # Calibration metadata path
-        self.calibration_file = None
-        self.chart_image = None
-        self.chart_swatches = None
-        self.correct_thumbnails = False
-        self.flatten_swatch_rects = None
-        self.temp_swatches = []
+        # Populate the imageFormatComboBox:
+        for fmt in OUTPUT_FORMATS:
+            self.ui.imageFormatComboBox.addItem(fmt)
 
-        # Modes
-        self.manual_selection_mode = False
-        self.flatten_mode = False
-        self.corner_points = []
-        self.showing_chart_preview = False
-        self.cropped_fp = None
-        self.original_preview_pixmap = None
-        self.fp_image_array = None
+        # Hide bit-depth and JPEG-quality frames until the user picks those formats:
+        self.ui.bitDepthFrame.setVisible(False)
+        self.ui.jpgQualityFrame.setVisible(False)
 
-        # thumbnail cache
-        self.thumbnail_cache = {}
+        # Whenever the format changes, update which controls are visible:
+        self.ui.imageFormatComboBox.currentTextChanged.connect(
+            self._update_format_controls
+        )
 
-        # thumnail preview controls
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setFocus()
+        # Populate the combo with every OIIO colourspace
+        config = ColorConfig()
+        names = config.getColorSpaceNames()  # returns List[str]
+        for cs in names:
+            self.ui.exrColourSpaceComboBox.addItem(cs)
 
-        # Instruction label
-        self.instruction_label = None
+        # Whenever the format changes, update which frames are shown:
+        self.ui.imageFormatComboBox.currentTextChanged.connect(self._update_format_controls)
+        # Initial call
+        self._update_format_controls(self.ui.imageFormatComboBox.currentText())
 
-        # profiling image processing
-        self.total_images = 0
-        self.finished_images = 0
-        self.global_start = None
-        self.processing_active = False
-        self.active_workers = []
+        # ────────────────────────────────────────────────────────────
+        # 5) Internal State Variables
+        # ────────────────────────────────────────────────────────────
+        # Calibration & chart data
+        self.calibration_file       = None
+        self.chart_image            = None
+        self.chart_swatches         = None
+        self.temp_swatches          = []
+        self.flatten_swatch_rects   = None
 
-        # CPU / Memory bars
+        # Mode flags
+        self.manual_selection_mode  = False
+        self.flatten_mode           = False
+        self.showing_chart_preview  = False
+
+        # Image buffers
+        self.cropped_fp             = None
+        self.original_preview_pixmap= None
+        self.fp_image_array         = None
+
+        # Thumbnails & metadata
+        self.thumbnail_cache        = {}
+        self.image_metadata_map     = {}
+
+        # UI helpers
+        self.instruction_label      = None
+        self.corner_points          = []
+
+        # Profiling counters
+        self.total_images           = 0
+        self.finished_images        = 0
+        self.global_start           = None
+        self.processing_active      = False
+        self.active_workers         = []
+
+        # ────────────────────────────────────────────────────────────
+        # 6) System Usage Meters
+        # ────────────────────────────────────────────────────────────
         for bar in (self.ui.cpuUsageProgressBar, self.ui.memoryUsageProgressBar):
             bar.setRange(0, 100)
-            bar.setFormat(bar.objectName().replace('ProgressBar', ' Usage: %p%'))
+            bar.setFormat(f"{bar.objectName().replace('ProgressBar','')} Usage: %p%")
+
+        self.ui.cpuUsageProgressBar.setRange(0, 100)
+        self.ui.memoryUsageProgressBar.setRange(0, 100)
+        self.ui.cpuUsageProgressBar.setFormat("CPU usage: %p%")
+        self.ui.memoryUsageProgressBar.setFormat("Memory usage: %p%")
         self.cpuTimer = QTimer(self)
         self.cpuTimer.timeout.connect(self.update_system_usage)
         self.cpuTimer.start(1000)
-        self.ui.cpuUsageProgressBar.setFormat("CPU Usage: %p%")
-        self.ui.memoryUsageProgressBar.setFormat("Memory Usage: %p%")
 
+        # Status‐bar warning label
         self.memoryWarningLabel = QLabel('', self)
         self.statusBar().addPermanentWidget(self.memoryWarningLabel)
 
-        # Manual selection RubberBand
-        self.rubberBand = QRubberBand(QRubberBand.Rectangle, self.ui.imagePreviewGraphicsView.viewport())
-        self.manual_selection_mode = False
-        self.showing_chart_preview = False
-        self.ui.showOriginalImagePushbutton.setEnabled(False)
-        self.ui.detectChartShelfPushbutton.setEnabled(False)
+        # ────────────────────────────────────────────────────────────
+        # 7) Manual‐Selection RubberBand
+        # ────────────────────────────────────────────────────────────
+        self.rubberBand = QRubberBand(QRubberBand.Rectangle,
+                                      self.ui.imagePreviewGraphicsView.viewport())
 
-        # Connect signals
-        self.ui.browseForChartPushbutton.clicked.connect(self.browse_chart)
-        self.ui.browseForImagesPushbutton.clicked.connect(self.browse_images)
-        self.ui.browseoutputDirectoryPushbutton.clicked.connect(self.browse_output_directory)
-        self.ui.setSelectedAsChartPushbutton.clicked.connect(self.set_selected_as_chart)
-        self.ui.processImagesPushbutton.clicked.connect(self.process_images_button_clicked)
-        self.ui.imagesListWidget.itemSelectionChanged.connect(self.preview_selected)
-        self.ui.previewChartPushbutton.clicked.connect(self.detect_chart)
-        self.ui.manuallySelectChartPushbutton.clicked.connect(self.manually_select_chart)
-        self.ui.detectChartShelfPushbutton.clicked.connect(lambda: self.detect_chart(input_source=self.ui.chartPathLineEdit.text(), is_npy=False))
-        self.ui.revertImagePushbutton.clicked.connect(self.revert_image)
-        self.ui.showOriginalImagePushbutton.clicked.connect(self.toggle_chart_preview)
-        self.ui.flattenChartImagePushButton.clicked.connect(self.flatten_chart_image)
-        self.ui.finalizeChartPushbutton.clicked.connect(self.finalize_manual_chart_selection)
-        self.ui.calculateAverageExposurePushbutton.clicked.connect(self.calculate_average_exposure)
-        self.ui.removeAverageDataPushbutton.clicked.connect(self.remove_average_exposure_data)
-        self.ui.displayDebugExposureDataCheckBox.toggled.connect(
+        # ────────────────────────────────────────────────────────────
+        # 8) Signal Connections
+        # ────────────────────────────────────────────────────────────
+        ui = self.ui  # alias for brevity
+
+        ui.browseForChartPushbutton.clicked.connect(self.browse_chart)
+        ui.browseForImagesPushbutton.clicked.connect(self.browse_images)
+        ui.browseoutputDirectoryPushbutton.clicked.connect(self.browse_output_directory)
+
+        ui.setSelectedAsChartPushbutton.clicked.connect(self.set_selected_as_chart)
+        ui.processImagesPushbutton.clicked.connect(self.process_images_button_clicked)
+
+        ui.imagesListWidget.itemSelectionChanged.connect(self.preview_selected)
+        ui.imagesListWidget.currentRowChanged.connect(self.update_thumbnail_strip)
+
+        ui.previewChartPushbutton.clicked.connect(self.detect_chart)
+        ui.manuallySelectChartPushbutton.clicked.connect(self.manually_select_chart)
+        ui.detectChartShelfPushbutton.clicked.connect(
+            lambda: self.detect_chart(input_source=ui.chartPathLineEdit.text(), is_npy=False)
+        )
+        ui.revertImagePushbutton.clicked.connect(self.revert_image)
+        ui.showOriginalImagePushbutton.clicked.connect(self.toggle_chart_preview)
+        ui.flattenChartImagePushButton.clicked.connect(self.flatten_chart_image)
+        ui.finalizeChartPushbutton.clicked.connect(self.finalize_manual_chart_selection)
+
+        ui.calculateAverageExposurePushbutton.clicked.connect(self.calculate_average_exposure)
+        ui.removeAverageDataPushbutton.clicked.connect(self.remove_average_exposure_data)
+        ui.displayDebugExposureDataCheckBox.toggled.connect(
             lambda checked: checked and self.show_exposure_debug_overlay()
         )
-        self.ui.highlightLimitSpinBox.valueChanged.connect(
-            lambda: self.show_exposure_debug_overlay() if self.ui.displayDebugExposureDataCheckBox.isChecked() else None
+        ui.highlightLimitSpinBox.valueChanged.connect(
+            lambda: self.show_exposure_debug_overlay() if ui.displayDebugExposureDataCheckBox.isChecked() else None
         )
-        self.ui.shadowLimitSpinBox.valueChanged.connect(
-            lambda: self.show_exposure_debug_overlay() if self.ui.displayDebugExposureDataCheckBox.isChecked() else None
+        ui.shadowLimitSpinBox.valueChanged.connect(
+            lambda: self.show_exposure_debug_overlay() if ui.displayDebugExposureDataCheckBox.isChecked() else None
         )
-        self.ui.nextImagePushbutton.clicked.connect(self.select_next_image)
-        self.ui.previousImagePushbutton.clicked.connect(self.select_previous_image)
-        self.ui.imagesListWidget.currentRowChanged.connect(self.update_thumbnail_strip)
 
-        # Event filters
-        self.ui.thumbnailPreviewFrame.installEventFilter(self)
-        # self.ui.thumbnailPreviewDisplayFrame_holder.installEventFilter(self)
-        self.ui.imagePreviewGraphicsView.viewport().installEventFilter(self)
+        ui.nextImagePushbutton.clicked.connect(self.select_next_image)
+        ui.previousImagePushbutton.clicked.connect(self.select_previous_image)
 
+        # ────────────────────────────────────────────────────────────
+        # 9) Event Filters & Focus
+        # ────────────────────────────────────────────────────────────
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocus()
+
+        ui.thumbnailPreviewFrame.installEventFilter(self)
+        ui.imagePreviewGraphicsView.viewport().installEventFilter(self)
+        ui.thumbnailPreviewFrame.installEventFilter(self)
+
+        # Keep track of the currently displayed pixmap
         self.current_image_pixmap = None
+
+        # print to log that the application is ready
+        self.log("Scan Space Image Processor initialized")
 
 
     def log(self, msg):
@@ -360,7 +639,7 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.ui.chartPathLineEdit.setText(path)
-            self.log(f"[Browse] Chart set to {path}")
+            # self.log(f"[Browse] Chart set to {path}")
 
     def reset_all_state(self):
         """Clear all cached/cached/selection data and UI for a new session."""
@@ -380,6 +659,7 @@ class MainWindow(QMainWindow):
         self.flatten_mode = False
         self.corner_points = []
         self.showing_chart_preview = False
+        self.ui.manuallySelectChartPushbutton.setEnabled(False)
 
         # Clear preview, chart path, and instruction label
         self.previewScene.clear()
@@ -409,6 +689,7 @@ class MainWindow(QMainWindow):
         # Optionally clear the log window (comment out if not desired)
         # self.ui.logOutputTextEdit.clear()
 
+    @exit_manual_mode
     def browse_images(self):
         self.reset_all_state()
         default = self.ui.rawImagesDirectoryLineEdit.text() or os.getcwd()
@@ -418,7 +699,7 @@ class MainWindow(QMainWindow):
 
         self.ui.rawImagesDirectoryLineEdit.setText(folder)
         self.settings.setValue('rawFolder', folder)
-        self.log(f"[Browse] Raw folder set to {folder}")
+        # self.log(f"[Browse] Raw folder set to {folder}")
         self.ui.imagesListWidget.clear()
 
         for fname in sorted(os.listdir(folder)):
@@ -448,7 +729,7 @@ class MainWindow(QMainWindow):
                 img = QImage(arr_uint8.data, w, h, w * c, QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(img)
                 self.thumbnail_cache[input_path] = {'pixmap': pixmap, 'array': arr}
-                self.log("[Browse] Thumbnail image added to cache")
+                # self.log("[Browse] Thumbnail image added to cache")
             else:
                 self.thumbnail_cache[input_path] = None
 
@@ -461,7 +742,20 @@ class MainWindow(QMainWindow):
         if folder:
             self.ui.outputDirectoryLineEdit.setText(folder)
             self.settings.setValue('outputFolder', folder)
-            self.log(f"[Browse] Output folder set to {folder}")
+            # self.log(f"[Browse] Output folder set to {folder}")
+
+    def _update_format_controls(self, ext: str):
+        """
+        Show the bit-depth frame only when TIFF is selected;
+        show the JPEG-quality frame only when JPEG is selected.
+        """
+        fmt = ext.lower()
+        # Show bit-depth options for TIFF
+        self.ui.bitDepthFrame.setVisible(fmt == '.tiff')
+        # Show JPEG-quality options for JPEG
+        self.ui.jpgQualityFrame.setVisible(fmt in ('.jpg', '.jpeg'))
+        # show exr options
+        self.ui.exrOptionsFrame.setVisible(fmt == '.exr')
 
     def set_selected_as_chart(self):
         # Clear previous chart assignments
@@ -478,10 +772,12 @@ class MainWindow(QMainWindow):
         meta['chart'] = True
         chart_path = meta['input_path']
         self.ui.chartPathLineEdit.setText(chart_path)
-        self.log(f"[Select] Chart set to {chart_path}")
+        # self.log(f"[Select] Chart set to {chart_path}")
+        self.ui.manuallySelectChartPushbutton.setEnabled(True)
 
         self.detect_chart(input_source=chart_path, is_npy=False)
 
+    @exit_manual_mode
     def preview_selected(self):
         item = self.ui.imagesListWidget.currentItem()
         if not item:
@@ -492,22 +788,24 @@ class MainWindow(QMainWindow):
         path_to_show = meta.get('output_path') or meta['input_path']
         if path_to_show:
             self.preview_thumbnail(path_to_show)
-            self.log(f"[Preview] Showing image: {path_to_show}")
+            # self.log(f"[Preview] Showing image: {path_to_show}")
 
         if meta.get('chart'):
             self.corrected_preview_pixmap = self.pixmap_from_array(meta['debug_images']['corrected_image'])
             self.show_debug_frame(True)
+            self.ui.manuallySelectChartPushbutton.setEnabled(True)
         else:
             self.show_debug_frame(False)
+            self.ui.manuallySelectChartPushbutton.setEnabled(False)
 
         if self.ui.displayDebugExposureDataCheckBox.isChecked():
             self.show_exposure_debug_overlay()
 
     def preview_thumbnail(self, path):
         exists = os.path.exists(path)
-        self.log(f"[Debug] exists: {exists}")
+        # self.log(f"[Debug] exists: {exists}")
         real = os.path.realpath(path)
-        self.log(f"[Debug] realpath: {real}")
+        # self.log(f"[Debug] realpath: {real}")
         ext = os.path.splitext(path)[1].lower()
         pixmap = None
 
@@ -516,14 +814,14 @@ class MainWindow(QMainWindow):
             if not img.isNull():
                 pixmap = QPixmap.fromImage(img)
             else:
-                self.log("[Preview] QImage failed for non-RAW file, trying PIL fallback")
+                # self.log("[Preview] QImage failed for non-RAW file, trying PIL fallback")
                 try:
                     pil = Image.open(path).convert("RGBA")
                     data = pil.tobytes("raw", "RGBA")
                     w, h = pil.size
                     img2 = QImage(data, w, h, QImage.Format_RGBA8888)
                     pixmap = QPixmap.fromImage(img2)
-                    self.log("[Preview] PIL fallback successful")
+                    # self.log("[Preview] PIL fallback successful")
                 except Exception as e:
                     self.log(f"[Preview Error] PIL fallback failed: {e}")
 
@@ -536,7 +834,7 @@ class MainWindow(QMainWindow):
                     h, w, c = arr_uint8.shape
                     img2 = QImage(arr_uint8.data, w, h, w * c, QImage.Format_RGB888)
                     pixmap = QPixmap.fromImage(img2)
-                    self.log("[Preview] RAW thumbnail loaded successfully")
+                    # self.log("[Preview] RAW thumbnail loaded successfully")
                 else:
                     raise Exception("load_thumbnail_array returned None")
             except Exception as e:
@@ -554,21 +852,27 @@ class MainWindow(QMainWindow):
             self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio
         )
         self.current_image_pixmap = pixmap
-        self.log(f"[Preview] Displayed preview for {path}")
+        # self.log(f"[Preview] Displayed preview for {path}")
 
+    @exit_manual_mode
     def start_processing(self):
         self.active_workers.clear()
         inf = self.ui.rawImagesDirectoryLineEdit.text().strip()
         outf = self.ui.outputDirectoryLineEdit.text().strip() or os.getcwd()
         thr = self.ui.imageProcessingThreadsSpinbox.value()
-        qual = self.ui.jpegQualitySpinbox.value()
+        qual = self.ui.jpegQualitySpinbox_2.value()
 
         export_masked = self.ui.exportMaskedImagesCheckBox.isChecked()
         use_original_filenames = self.ui.useOriginalFilenamesCheckBox.isChecked()
+        output_ext = self.ui.imageFormatComboBox.currentText().lower()
+        if output_ext == '.tiff':
+            tiff_bits = 16 if self.ui.sixteenBitRadioButton.isChecked() else 8
+        else:
+            tiff_bits = None
 
         # Decide whether to load from .npy or re‐extract
         if self.calibration_file and os.path.exists(self.calibration_file):
-            self.log(f"[Process] Loading swatches from {self.calibration_file}")
+            # self.log(f"[Process] Loading swatches from {self.calibration_file}")
             swatches = np.load(self.calibration_file, allow_pickle=True)
             if swatches is None:
                 self.log("❌ Failed to load swatches from file")
@@ -578,7 +882,7 @@ class MainWindow(QMainWindow):
             if not (chart and inf and outf):
                 self.log("❗ Please fill all paths (chart, raw folder, output).")
                 return
-            self.log("[Process] Extracting swatches from chart")
+            # self.log("[Process] Extracting swatches from chart")
             if self.chart_swatches is not None:
                 swatches, self.calibration_file = self.extract_chart_swatches(chart)
                 if swatches is None:
@@ -602,11 +906,18 @@ class MainWindow(QMainWindow):
                 metadata['calibration'] = self.calibration_file
                 item.setData(Qt.UserRole, metadata)
 
-
         self.total_images = len(images)
         self.finished_images = 0
         self.global_start = time.time()
         self.log(f"[Process] Dispatching {self.total_images} images across {thr} Parallel Threads.")
+
+        # Show and initialize the status bar
+        self.ui.processingStatusBarFrame.setVisible(True)
+        self.ui.processingStatusProgressBar.setRange(0, self.total_images)
+        self.ui.processingStatusProgressBar.setValue(0)
+        self.ui.processingStatusProgressBar.setFormat(
+            f"0 out of {self.total_images} images processed"
+        )
 
         # Dispatch workers
         size = max(1, len(images) // thr)
@@ -625,10 +936,15 @@ class MainWindow(QMainWindow):
                 for i in range(self.ui.imagesListWidget.count())
                 for item in [self.ui.imagesListWidget.item(i)]
             }
+
+            exr_cs = None
+            if output_ext == '.exr':
+                exr_cs = self.ui.exrColourSpaceComboBox.currentText()
+
             worker = ImageCorrectionWorker(
                 chunk, swatches, outf, sig, qual, rename_map,
                 name_base=name_base, padding=padding,
-                export_masked=export_masked
+                export_masked=export_masked, output_format=output_ext, tiff_bitdepth=tiff_bits, exr_colorspace=exr_cs,
             )
             shadow_limit = self.ui.shadowLimitSpinBox.value() / 100.0
             highlight_limit = self.ui.highlightLimitSpinBox.value() / 100.0
@@ -647,7 +963,8 @@ class MainWindow(QMainWindow):
         self.active_workers.clear()
         self.processing_active = False
         self.ui.processImagesPushbutton.setText("Process Images")
-        self.ui.processImagesPushbutton.setStyleSheet("")  # Revert to default
+        self.ui.processImagesPushbutton.setStyleSheet("")
+        self.ui.processingStatusBarFrame.setVisible(False)
         self.log("[Processing] All processing cancelled by user.")
 
     def update_image_status(self, image_path, status, processing_time, output_path):
@@ -678,6 +995,13 @@ class MainWindow(QMainWindow):
 
         if status in ('finished', 'error'):
             self.finished_images += 1
+
+            # Update status bar
+            self.ui.processingStatusProgressBar.setValue(self.finished_images)
+            self.ui.processingStatusProgressBar.setFormat(
+                f"{self.finished_images} out of {self.total_images} images processed"
+            )
+
             if self.finished_images >= self.total_images and self.global_start:
                 total = time.time() - self.global_start
                 self.log(f"[Timing] {self.total_images} images processed in {total:.2f}s")
@@ -685,6 +1009,7 @@ class MainWindow(QMainWindow):
 
     def processing_complete(self):
         self.processing_active = False
+        self.ui.processingStatusBarFrame.setVisible(False)
         self.ui.processImagesPushbutton.setText("Process Images")
         self.ui.processImagesPushbutton.setStyleSheet("")
         self.log("[Processing] All processing complete.")
@@ -726,9 +1051,9 @@ class MainWindow(QMainWindow):
 
     def show_preview(self, image_path):
         path = os.path.normpath(image_path)
-        self.log(f"[Preview] Loading processed image: {path}")
+        # self.log(f"[Preview] Loading processed image: {path}")
         exists = os.path.exists(path)
-        self.log(f"[Debug] exists: {exists}")
+        # self.log(f"[Debug] exists: {exists}")
 
         try:
             pil_image = Image.open(image_path).convert("RGBA")
@@ -748,9 +1073,9 @@ class MainWindow(QMainWindow):
         pw, ph = pixmap.width(), pixmap.height()
         vw = self.ui.imagePreviewGraphicsView.viewport().width()
         vh = self.ui.imagePreviewGraphicsView.viewport().height()
-        self.log(f"[Debug] Pixmap size: {pw}x{ph}, Viewport: {vw}x{vh}")
+        # self.log(f"[Debug] Pixmap size: {pw}x{ph}, Viewport: {vw}x{vh}")
         self._display_preview(pixmap)
-        self.log("[Preview] Displayed processed image")
+        # self.log("[Preview] Displayed processed image")
 
     def _display_preview(self, pixmap):
         self.previewScene.clear()
@@ -790,20 +1115,44 @@ class MainWindow(QMainWindow):
             c = "#f44336"
         return f"QProgressBar{{border:1px solid #bbb;border-radius:5px;text-align:center}}QProgressBar::chunk{{background-color:{c};width:1px}}"
 
+    def load_raw_image(self, path: str) -> np.ndarray | None:
+        """
+        Load a RAW file off the main thread but return synchronously:
+          - Schedules a RawLoadWorker(path) on self.threadpool.
+          - Spins a QEventLoop until the worker emits loaded(fp_array) or error(msg).
+          - Returns the float32 array in [0,1], or None on failure.
+        """
+        loop = QEventLoop()
+        result = {'fp': None}
+
+        # 1) Create the worker
+        worker = RawLoadWorker(path)
+
+        # 2) Hook up signals to capture the result and quit the local loop
+        def _on_loaded(fp):
+            result['fp'] = fp
+            loop.quit()
+
+        def _on_error(msg):
+            self.log(f"[RAW Load Error] {msg}")
+            loop.quit()
+
+        worker.signals.loaded.connect(_on_loaded)
+        worker.signals.error.connect(_on_error)
+
+        # 3) Start the worker & wait
+        self.threadpool.start(worker)
+        loop.exec()  # <- yields to Qt event loop until quit()
+
+        # 4) Return whatever we got
+        return result['fp']
+
     def extract_chart_swatches(self, chart_path):
-        try:
-            with rawpy.imread(chart_path) as raw:
-                rgb = raw.postprocess(
-                    output_bps=16,
-                    gamma=(1,1),
-                    no_auto_bright=True,
-                    use_camera_wb=True,
-                    output_color=rawpy.ColorSpace.sRGB
-                )
-                img = np.array(rgb, dtype=np.float32) / 65535.0
-        except Exception as e:
-            self.log(f"[Chart Load Error] {e}")
+        img = self.load_raw_image(chart_path)
+
+        if img is None:
             return None, None
+
         for result in detect_colour_checkers_segmentation(img, additional_data=True):
             swatches = result.swatch_colours
             if isinstance(swatches, np.ndarray) and swatches.shape == (24, 3):
@@ -813,77 +1162,87 @@ class MainWindow(QMainWindow):
         self.log("[Swatches] No valid colour chart swatches detected.")
         return None, None
 
-    def finalize_manual_chart_selection(self):
-        if not self.manual_selection_mode:
-            self.log("finalized chart")
+    def finalize_manual_chart_selection(self, *, canceled: bool = False):
+        """
+        Exit manual chart selection (either commit or cancel) and restore UI.
+
+        Args:
+            canceled: if True, we’re aborting manual mode and do NOT commit temp_swatches.
+                      if False, this is a real “Finalize Chart” and we copy temp_swatches → chart_swatches.
+        """
+        # 1) Log & commit (only if finalize, not cancel)
+        if canceled:
+            self.log("[Manual] Manual chart selection canceled.")
         else:
-            self.log("exiting manual chart selection")
-            self.ui.manuallySelectChartPushbutton.setStyleSheet('')
+            self.log("[Manual] Manual chart selection finalized.")
+            # commit the temporary swatches/calibration
+            if hasattr(self, 'temp_swatches'):
+                self.chart_swatches = self.temp_swatches
+            if hasattr(self, 'temp_calibration_file'):
+                self.calibration_file = self.temp_calibration_file
+
+        # 2) Reset internal modes & data
+        self.manual_selection_mode = False
+        self.flatten_mode = False
+        self.corner_points.clear()
+        self.flatten_swatch_rects = None
+
+        # 3) Hide any visible rubber‐band
+        if hasattr(self, 'rubberBand') and self.rubberBand.isVisible():
+            self.rubberBand.hide()
+
+        # 4) Restore the *original* preview if we have it
+        if hasattr(self, 'original_preview_pixmap') and self.original_preview_pixmap:
+            self._display_preview(self.original_preview_pixmap)
+            self.showing_chart_preview = False
+            self.ui.showOriginalImagePushbutton.setText("Show Chart Preview")
+
+        # 5) Disable & reset style of all chart‐tools buttons
+        for btn in (
+                self.ui.manuallySelectChartPushbutton,
+                self.ui.detectChartShelfPushbutton,
+                self.ui.flattenChartImagePushButton,
+                self.ui.showOriginalImagePushbutton,
+                self.ui.finalizeChartPushbutton
+        ):
+            btn.setEnabled(False)
+            btn.setStyleSheet("")
+
+        # 6) Hide the tool‐shelf & instruction overlay
         self.ui.detectChartToolshelfFrame.setVisible(False)
-        self.ui.showOriginalImagePushbutton.setEnabled(False)
-        self.ui.detectChartShelfPushbutton.setEnabled(False)
-        self.ui.flattenChartImagePushButton.setEnabled(False)
-        self.ui.finalizeChartPushbutton.setEnabled(False)
-        self.ui.finalizeChartPushbutton.setStyleSheet('')
-        self.instruction_label.hide()
-        self.ui.detectChartToolshelfFrame.setVisible(False)
+        if hasattr(self, 'instruction_label') and isinstance(self.instruction_label, QLabel):
+            self.instruction_label.hide()
+
+        # 7) Hide debug frame if present
         self.show_debug_frame(False)
-        self.chart_swatches = self.temp_swatches
 
-
+    @exit_manual_mode
     def manually_select_chart(self):
-        if self.manual_selection_mode:
-            self.finalize_manual_chart_selection()
-            return
-
+        """
+        Enter manual chart selection mode:
+          1) Load RAW thumbnail and full-precision image.
+          2) Reset UI (hide debug, rubber-band, disable buttons).
+          3) Show instruction label.
+          4) Show the chart-tools shelf, style only the Manual-Select button.
+          5) Enable manual-selection mode; Flatten remains disabled until crop.
+        """
         path = self.ui.chartPathLineEdit.text().strip()
         if not path:
             self.log('[Manual] No chart selected')
             return
-        self.log(f'[Manual] Loading chart for manual selection: {path}')
+        # self.log(f'[Manual] Loading chart for manual selection: {path}')
 
-        if self.instruction_label:
-            self.instruction_label.setText(
-                "Click and drag box around the colour chart"
-            )
-            self.instruction_label.show()
-        else:
-            self.instruction_label = QLabel('Click and drag box around the colour chart')
-            self.instruction_label.setAlignment(Qt.AlignCenter)
-            self.ui.verticalLayout_4.insertWidget(
-                self.ui.verticalLayout_4.indexOf(self.ui.imagePreviewGraphicsView),
-                self.instruction_label
-            )
-
-        layout = self.ui.detectChartToolshelfFrame
-        active = not layout.isVisible()
-        layout.setVisible(active)
-
-        # Light green highlight for active mode
-        css = "background-color: #A5D6A7"
-        self.ui.manuallySelectChartPushbutton.setStyleSheet(css if active else "")
-
-        # Reset flatten button until a new crop is drawn
-        self.ui.flattenChartImagePushButton.setEnabled(False)
-        self.ui.flattenChartImagePushButton.setStyleSheet("")
-
-        try:
-            with rawpy.imread(path) as raw:
-                # Create a viewable proxy image
-                rgb_full = raw.postprocess(
-                    output_bps=16, gamma=(1,1), no_auto_bright=True,
-                    use_camera_wb=True, output_color=rawpy.ColorSpace.sRGB
-                )
-                # Create a full bit depth image to be edited in the background
-                self.fp_image_array = np.array(rgb_full, dtype=np.float32) / 65535.0
-                thumb = raw.postprocess(
-                    output_bps=8, gamma=(1,1), no_auto_bright=True,
-                    use_camera_wb=True, output_color=rawpy.ColorSpace.sRGB
-                )
-                thumb_arr = np.array(thumb, dtype=np.uint8)
-        except Exception as e:
-            self.log(f'[Manual] Raw load error: {e}')
+        # Load full-precision float32 image
+        full_fp = self.load_raw_image(path)
+        if full_fp is None:
+            self.log(f'[Manual] RAW load failed: {path}')
             return
+        self.fp_image_array = full_fp
+
+        # Create an 8-bit thumbnail from full_fp
+        thumb_arr = np.uint8(255 * np.clip(full_fp, 0.0, 1.0))
+
+        # Display the thumbnail
         h, w, _ = thumb_arr.shape
         bytes_per_line = w * 3
         qimg = QImage(thumb_arr.data, w, h, bytes_per_line, QImage.Format_RGB888)
@@ -893,11 +1252,58 @@ class MainWindow(QMainWindow):
         self.previewScene.clear()
         self.previewScene.addItem(QGraphicsPixmapItem(pixmap))
         self.ui.imagePreviewGraphicsView.resetTransform()
-        self.ui.imagePreviewGraphicsView.fitInView(self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio)
+        self.ui.imagePreviewGraphicsView.fitInView(
+            self.previewScene.itemsBoundingRect(),
+            Qt.KeepAspectRatio
+        )
+
+        # 2) Reset the UI: hide debug, rubber-band, disable all chart-tools buttons
+        self.show_debug_frame(False)
+        if hasattr(self, 'rubberBand') and self.rubberBand.isVisible():
+            self.rubberBand.hide()
+        for btn in (
+                self.ui.manuallySelectChartPushbutton,
+                self.ui.detectChartShelfPushbutton,
+                self.ui.showOriginalImagePushbutton,
+                self.ui.flattenChartImagePushButton,
+                self.ui.finalizeChartPushbutton
+        ):
+            btn.setEnabled(False)
+            btn.setStyleSheet("")
+
+        # 3) Instruction label
+        if self.instruction_label:
+            self.instruction_label.setText("Click and drag box around the colour chart")
+            self.instruction_label.show()
+        else:
+            self.instruction_label = QLabel("Click and drag box around the colour chart")
+            self.instruction_label.setAlignment(Qt.AlignCenter)
+            self.ui.verticalLayout_4.insertWidget(
+                self.ui.verticalLayout_4.indexOf(self.ui.imagePreviewGraphicsView),
+                self.instruction_label
+            )
+
+        # 4) Show the tools shelf and style the Manual-Select button
+        self.ui.detectChartToolshelfFrame.setVisible(True)
+        css = "background-color: #A5D6A7"
+        self.ui.manuallySelectChartPushbutton.setEnabled(True)
+        self.ui.manuallySelectChartPushbutton.setStyleSheet(css)
+
+        # 5) Enter manual-selection mode; keep Flatten disabled until crop
         self.manual_selection_mode = True
         self.flatten_mode = False
-        self.ui.showOriginalImagePushbutton.setEnabled(False)
-        self.ui.detectChartShelfPushbutton.setEnabled(False)
+        self.ui.flattenChartImagePushButton.setEnabled(False)
+        self.ui.flattenChartImagePushButton.setStyleSheet("")
+
+    def on_manual_crop_complete(self, rect: QRect):
+        # … your existing cropping logic to set self.cropped_fp …
+        self.ui.detectChartShelfPushbutton.setEnabled(True)
+        self.ui.showOriginalImagePushbutton.setEnabled(True)
+
+        # NOW enable the Flatten button
+        css = "background-color: #A5D6A7"
+        self.ui.flattenChartImagePushButton.setEnabled(True)
+        self.ui.flattenChartImagePushButton.setStyleSheet(css)
 
     def flatten_chart_image(self):
         # must have a cropped image first
@@ -1038,7 +1444,7 @@ class MainWindow(QMainWindow):
                     )
                     self.cropped_fp = warped_fp
 
-                    self.log("[Flatten] Chart and FP image flattened")
+                    # self.log("[Flatten] Chart and FP image flattened")
                     self.flatten_mode = False
                     self.instruction_label.setText(
                         "Please Run Detect Chart or Revert image to select new region"
@@ -1059,6 +1465,15 @@ class MainWindow(QMainWindow):
                 self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio)
             return True
 
+        # Event to scroll the thumbnail preview area with mousewheel
+        if source == self.ui.thumbnailPreviewFrame and event.type() == QEvent.Wheel:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self.select_previous_image()
+            elif delta < 0:
+                self.select_next_image()
+            return True
+
         return super().eventFilter(source, event)
 
     def preview_manual_swatch_correction(self):
@@ -1068,8 +1483,6 @@ class MainWindow(QMainWindow):
         Assumes self.cropped_fp is the current floating-point chart image,
         and self.flatten_swatch_rects is a list of 24 QRect objects.
         """
-        import numpy as np
-        import colour
 
         if not (hasattr(self, 'flatten_swatch_rects') and self.flatten_swatch_rects and len(
                 self.flatten_swatch_rects) == 24):
@@ -1088,24 +1501,35 @@ class MainWindow(QMainWindow):
             swatch_colours.append(mean_color)
         swatch_colours = np.array(swatch_colours)
         self.temp_swatches = swatch_colours
-        self.log(f"[Manual Swatch] Extracted {len(swatch_colours)} mean swatch colours.")
+        self.chart_swatches = swatch_colours
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.npy')
+        np.save(tmp_file.name, swatch_colours)
+        self.calibration_file = tmp_file.name
+        # self.log(f"[Manual Swatch] Extracted {len(swatch_colours)} mean swatch colours.")
 
-        # Reference chart (D65, ColorChecker 24)
-        D65 = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D65']
-        REFERENCE_COLOUR_CHECKER = colour.CCS_COLOURCHECKERS['ColorChecker24 - After November 2014']
-        ref_swatches = colour.XYZ_to_RGB(
-            colour.xyY_to_XYZ(list(REFERENCE_COLOUR_CHECKER.data.values())),
-            REFERENCE_COLOUR_CHECKER.illuminant, D65,
-            colour.RGB_COLOURSPACES['sRGB'].matrix_XYZ_to_RGB
+        worker = SwatchPreviewWorker(
+            self.cropped_fp,
+            swatch_colours,
+            reference_swatches
         )
-        corrected = colour.colour_correction(img_fp, swatch_colours, ref_swatches)
-        corrected = np.clip(corrected, 0, 1)
-        corrected_uint8 = np.uint8(255 * colour.cctf_encoding(corrected))
+        worker.signals.finished.connect(self._on_manual_swatch_preview_done)
+        worker.signals.error.connect(self._on_manual_swatch_preview_error)
 
-        # Display result
-        pixmap = self.pixmap_from_array(corrected_uint8)
+        self.threadpool.start(worker)
+
+    def _on_manual_swatch_preview_done(self, img_uint8):
+        """
+        Receives the uint8 array, converts to QPixmap, updates preview, re-enables UI.
+        """
+        pixmap = self.pixmap_from_array(img_uint8)
         self._display_preview(pixmap)
-        self.log("[Manual Swatch] Manual correction preview displayed.")
+        # self.log("[Manual Swatch] Manual correction preview displayed.")
+
+    def _on_manual_swatch_preview_error(self, message):
+        """
+        Called if the worker threw an exception.
+        """
+        self.log(f"[Manual Swatch] Preview failed: {message}")
 
 
     def detect_chart(self, input_source=None, is_npy=False):
@@ -1128,20 +1552,7 @@ class MainWindow(QMainWindow):
         # RAW file check
         if isinstance(img_fp, str) and img_fp.lower().endswith(
                 ('.arw', '.nef', '.cr2', '.cr3', '.dng', '.rw2', '.raw')):
-            try:
-                with rawpy.imread(img_fp) as raw:
-                    img_rgb = raw.postprocess(
-                        output_bps=16,
-                        gamma=(1, 1),
-                        no_auto_bright=True,
-                        use_camera_wb=True,
-                        output_color=rawpy.ColorSpace.sRGB
-                    )
-                img_fp = np.array(img_rgb, dtype=np.float32) / 65535.0
-                self.log("[Detect Chart] Loaded RAW file to RGB for detection.")
-            except Exception as e:
-                self.log(f"[Detect Chart] RAW decode failed: {e}")
-                return
+            img_fp = self.load_raw_image(input_source)
 
         selected_item = self.ui.imagesListWidget.currentItem()
         if selected_item:
@@ -1152,7 +1563,12 @@ class MainWindow(QMainWindow):
         results = detect_colour_checkers_segmentation(img_fp, additional_data=True)
 
         for colour_checker_data in results:
-            swatch_colours, swatch_masks, colour_checker_image = colour_checker_data.values
+            if hasattr(colour_checker_data, 'swatch_colours'):
+                swatch_colours = colour_checker_data.swatch_colours
+                swatch_masks = colour_checker_data.swatch_masks
+                colour_checker_image = colour_checker_data.colour_checker
+            else:
+                swatch_colours, swatch_masks, colour_checker_image = colour_checker_data[:3]
 
             # Save calibration data
             tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.npy')
@@ -1162,14 +1578,7 @@ class MainWindow(QMainWindow):
             self.chart_swatches = swatch_colours
 
             # Generate Corrected Image
-            D65 = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D65']
-            reference = colour.CCS_COLOURCHECKERS['ColorChecker24 - After November 2014']
-            ref_swatches = colour.XYZ_to_RGB(
-                colour.xyY_to_XYZ(list(reference.data.values())),
-                reference.illuminant, D65,
-                colour.RGB_COLOURSPACES['sRGB'].matrix_XYZ_to_RGB
-            )
-            corrected = colour.colour_correction(img_fp, swatch_colours, ref_swatches)
+            corrected = colour.colour_correction(img_fp, swatch_colours, reference_swatches)
             corrected = np.clip(corrected, 0, 1)
             corrected_uint8 = np.uint8(255 * colour.cctf_encoding(corrected))
 
@@ -1224,8 +1633,10 @@ class MainWindow(QMainWindow):
             break  # Only process first detected checker
 
         if detected:
-            self.log("[Detect] Chart detected successfully. Debug images generated.")
+            # self.log("[Detect] Chart detected successfully. Debug images generated.")
             self.show_debug_frame(True)
+            self.ui.finalizeChartPushbutton.setEnabled(True)
+
         else:
             self.log("[Detect] No valid chart detected.")
             self.show_debug_frame(False)
@@ -1247,16 +1658,57 @@ class MainWindow(QMainWindow):
         self.ui.imagePreviewGraphicsView.fitInView(self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio)
 
     def revert_image(self):
-        if hasattr(self, 'original_preview_pixmap'):
+        """
+        Restore the original preview and fully reset the manual‐selection UI.
+
+        - Displays the saved original_preview_pixmap.
+        - Hides any rubber‐band or instruction label.
+        - Closes the debug frame.
+        - Disables all chart‐tool buttons (detect, show, flatten, finalize).
+        - Enables only the manual‐select button for a new crop.
+        """
+        # 1) Show original preview
+        if hasattr(self, 'original_preview_pixmap') and self.original_preview_pixmap:
             self.previewScene.clear()
             self.previewScene.addItem(QGraphicsPixmapItem(self.original_preview_pixmap))
             self.ui.imagePreviewGraphicsView.resetTransform()
-            self.ui.imagePreviewGraphicsView.fitInView(self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio)
+            self.ui.imagePreviewGraphicsView.fitInView(
+                self.previewScene.itemsBoundingRect(),
+                Qt.KeepAspectRatio
+            )
             self.showing_chart_preview = False
-            # Re-enable manual selection for new region
-            self.manual_selection_mode = True
-            self.ui.showOriginalImagePushbutton.setEnabled(False)
-            self.ui.detectChartShelfPushbutton.setEnabled(False)
+
+        # 2) Hide any debug/chart overlay
+        self.show_debug_frame(False)
+        if hasattr(self, 'instruction_label'):
+            self.instruction_label.hide()
+
+        # 3) Remove any rubber‐band selection
+        if hasattr(self, 'rubberBand') and self.rubberBand.isVisible():
+            self.rubberBand.hide()
+        # Prepare for a fresh manual selection
+        self.manual_selection_mode = True
+
+        # 4) Reset & disable ALL tool buttons until we have new crop:
+        for btn in (
+            self.ui.detectChartShelfPushbutton,
+            self.ui.showOriginalImagePushbutton,
+            self.ui.flattenChartImagePushButton,
+            self.ui.finalizeChartPushbutton
+        ):
+            btn.setEnabled(False)
+            btn.setStyleSheet('')
+
+        # 5) Re‐enable manual‐select so user can draw a new box:
+        self.ui.manuallySelectChartPushbutton.setEnabled(True)
+        self.ui.manuallySelectChartPushbutton.setStyleSheet('')
+
+        # 6) Clear any temp data from prior selection:
+        if hasattr(self, 'temp_swatches'):
+            del self.temp_swatches
+        if hasattr(self, 'temp_calibration_file'):
+            del self.temp_calibration_file
+
 
     def show_debug_frame(self, visible):
         self.ui.colourChartDebugToolsFrame.setVisible(visible)
@@ -1281,7 +1733,7 @@ class MainWindow(QMainWindow):
         if img is not None:
             pixmap = self.pixmap_from_array(img)
             self._display_preview(pixmap)
-            self.log("[Debug View] Swatches and Clusters shown.")
+            # self.log("[Debug View] Swatches and Clusters shown.")
         else:
             self.log("[Debug View] Swatches and Clusters unavailable.")
 
@@ -1298,7 +1750,7 @@ class MainWindow(QMainWindow):
         if img is not None:
             pixmap = self.pixmap_from_array(img)
             self._display_preview(pixmap)
-            self.log("[Debug View] Corrected image shown.")
+            # self.log("[Debug View] Corrected image shown.")
         else:
             self.log("[Debug View] Corrected image unavailable.")
 
@@ -1315,7 +1767,7 @@ class MainWindow(QMainWindow):
         if img is not None:
             pixmap = self.pixmap_from_array(img)
             self._display_preview(pixmap)
-            self.log("[Debug View] Swatch overlay shown.")
+            # self.log("[Debug View] Swatch overlay shown.")
         else:
             self.log("[Debug View] Swatch overlay unavailable.")
 
@@ -1332,7 +1784,7 @@ class MainWindow(QMainWindow):
         if img is not None:
             pixmap = self.pixmap_from_array(img)
             self._display_preview(pixmap)
-            self.log("[Debug View] Detection debug shown.")
+            # self.log("[Debug View] Detection debug shown.")
         else:
             self.log("[Debug View] Detection debug unavailable.")
 
@@ -1342,6 +1794,7 @@ class MainWindow(QMainWindow):
         img = QImage(array.data, w, h, bytes_per_line, QImage.Format_RGB888)
         return QPixmap.fromImage(img)
 
+    @exit_manual_mode
     def calculate_average_exposure(self):
         """
         Compute and store exposure normalization multipliers for all images.
@@ -1380,9 +1833,7 @@ class MainWindow(QMainWindow):
 
         # Reference: chart if present, otherwise mean of all
         reference_brightness = chart_brightness if chart_brightness is not None else np.mean(brightness_list)
-        if chart_brightness is not None:
-            self.log(f"[Exposure Calc] Using chart image as reference ({reference_brightness:.3f})")
-        else:
+        if chart_brightness is None:
             self.log(f"[Exposure Calc] Using average image brightness as reference ({reference_brightness:.3f})")
 
         # Set exposure multiplier for each image
@@ -1415,18 +1866,13 @@ class MainWindow(QMainWindow):
             with Image.open(path) as img:
                 img.thumbnail(max_size)
                 arr = np.asarray(img, dtype=np.float32) / 255.0
-                self.log("[Thumb] Thumbnail loaded from image without further processing.")
+                # self.log("[Thumb] Thumbnail loaded from image without further processing.")
                 if self.chart_swatches and self.correct_thumbnails:
                     try:
-                        D65 = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D65']
-                        reference = colour.CCS_COLOURCHECKERS['ColorChecker24 - After November 2014']
-                        ref_swatches = colour.XYZ_to_RGB(
-                            colour.xyY_to_XYZ(list(reference.data.values())),
-                            reference.illuminant, D65,
-                            colour.RGB_COLOURSPACES['sRGB'].matrix_XYZ_to_RGB
-                        )
-                        arr = np.clip(colour.colour_correction(arr, self.chart_swatches, ref_swatches), 0, 1)
-                        self.log("[Thumb] Applied colour correction to thumbnail.")
+                        corrected = colour.colour_correction(arr, self.chart_swatches, reference_swatches)
+                        corrected = np.clip(corrected, 0, 1)
+                        arr = np.uint8(255 * colour.cctf_encoding(corrected))
+                        # self.log("[Thumb] Applied colour correction to thumbnail.")
                     except Exception as e:
                         self.log(f"[Thumb] Colour correction on thumbnail failed: {e}")
                 return arr
@@ -1443,7 +1889,7 @@ class MainWindow(QMainWindow):
                                 pil = Image.open(io.BytesIO(thumb.data))
                                 pil.thumbnail(max_size)
                                 arr = np.asarray(pil, dtype=np.float32) / 255.0
-                                self.log("[Thumb] Loaded embedded JPEG thumbnail from RAW.")
+                                # self.log("[Thumb] Loaded embedded JPEG thumbnail from RAW.")
                                 return arr
                             else:
                                 self.log("[Thumb] No embedded JPEG, using raw postprocess.")
@@ -1458,7 +1904,7 @@ class MainWindow(QMainWindow):
                         scale = min(max_size[0] / h, max_size[1] / w, 1.0)
                         if scale < 1.0:
                             arr = cv2.resize(arr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-                        self.log("[Thumb] Loaded thumbnail from rawpy postprocess.")
+                        # self.log("[Thumb] Loaded thumbnail from rawpy postprocess.")
                         return arr
                 except Exception as e2:
                     self.log(f"[Thumb] RAW fallback failed: {e2}")
@@ -1518,10 +1964,9 @@ class MainWindow(QMainWindow):
         self.ui.imagePreviewGraphicsView.resetTransform()
         self.ui.imagePreviewGraphicsView.fitInView(self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio)
         self.current_image_pixmap = pixmap
-        self.log(
-            f"[Exposure Debug] Overlay shown (Highlight: ≥{highlight_threshold:.2f}, Shadow: ≤{shadow_threshold:.2f})"
-        )
+        # self.log(f"[Exposure Debug] Overlay shown (Highlight: ≥{highlight_threshold:.2f}, Shadow: ≤{shadow_threshold:.2f})")
 
+    @exit_manual_mode
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Right:
             self.select_next_image()
