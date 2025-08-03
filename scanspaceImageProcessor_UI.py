@@ -46,12 +46,13 @@ class Ui_MainWindow(object):
         self.useOriginalFilenamesCheckBox = QCheckBox(self.toolsLayoutFrame)
         self.useOriginalFilenamesCheckBox.setObjectName(u"useOriginalFilenamesCheckBox")
 
-        self.toolsLayoutGrid.addWidget(self.useOriginalFilenamesCheckBox, 15, 0, 1, 2)
+        self.toolsLayoutGrid.addWidget(self.useOriginalFilenamesCheckBox, 14, 0, 1, 2)
 
         self.label_13 = QLabel(self.toolsLayoutFrame)
         self.label_13.setObjectName(u"label_13")
+        self.label_13.setIndent(9)
 
-        self.toolsLayoutGrid.addWidget(self.label_13, 12, 0, 1, 1)
+        self.toolsLayoutGrid.addWidget(self.label_13, 11, 0, 1, 1)
 
         self.label_9 = QLabel(self.toolsLayoutFrame)
         self.label_9.setObjectName(u"label_9")
@@ -61,168 +62,39 @@ class Ui_MainWindow(object):
         self.label_9.setFont(font)
         self.label_9.setAlignment(Qt.AlignCenter)
 
-        self.toolsLayoutGrid.addWidget(self.label_9, 6, 0, 1, 2)
-
-        self.newImageNameLineEdit = QLineEdit(self.toolsLayoutFrame)
-        self.newImageNameLineEdit.setObjectName(u"newImageNameLineEdit")
-
-        self.toolsLayoutGrid.addWidget(self.newImageNameLineEdit, 16, 0, 1, 2)
-
-        self.calculateAverageExposurePushbutton = QPushButton(self.toolsLayoutFrame)
-        self.calculateAverageExposurePushbutton.setObjectName(u"calculateAverageExposurePushbutton")
-
-        self.toolsLayoutGrid.addWidget(self.calculateAverageExposurePushbutton, 7, 0, 1, 2)
-
-        self.jpgQualityFrame = QFrame(self.toolsLayoutFrame)
-        self.jpgQualityFrame.setObjectName(u"jpgQualityFrame")
-        self.jpgQualityFrame.setFrameShape(QFrame.StyledPanel)
-        self.jpgQualityFrame.setFrameShadow(QFrame.Raised)
-        self.horizontalLayout_4 = QHBoxLayout(self.jpgQualityFrame)
-        self.horizontalLayout_4.setSpacing(0)
-        self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
-        self.horizontalLayout_4.setContentsMargins(0, 0, 0, 0)
-        self.label_14 = QLabel(self.jpgQualityFrame)
-        self.label_14.setObjectName(u"label_14")
-        self.label_14.setMinimumSize(QSize(80, 0))
-        self.label_14.setAlignment(Qt.AlignLeading|Qt.AlignLeft|Qt.AlignVCenter)
-        self.label_14.setMargin(5)
-        self.label_14.setIndent(5)
-
-        self.horizontalLayout_4.addWidget(self.label_14)
-
-        self.jpegQualitySpinbox_2 = QSpinBox(self.jpgQualityFrame)
-        self.jpegQualitySpinbox_2.setObjectName(u"jpegQualitySpinbox_2")
-        self.jpegQualitySpinbox_2.setMinimum(10)
-        self.jpegQualitySpinbox_2.setMaximum(100)
-        self.jpegQualitySpinbox_2.setSingleStep(10)
-        self.jpegQualitySpinbox_2.setValue(100)
-
-        self.horizontalLayout_4.addWidget(self.jpegQualitySpinbox_2)
-
-
-        self.toolsLayoutGrid.addWidget(self.jpgQualityFrame, 24, 0, 1, 2)
-
-        self.setSelectedAsChartPushbutton = QPushButton(self.toolsLayoutFrame)
-        self.setSelectedAsChartPushbutton.setObjectName(u"setSelectedAsChartPushbutton")
-
-        self.toolsLayoutGrid.addWidget(self.setSelectedAsChartPushbutton, 1, 0, 1, 2)
-
-        self.imagePaddingSpinBox = QSpinBox(self.toolsLayoutFrame)
-        self.imagePaddingSpinBox.setObjectName(u"imagePaddingSpinBox")
-        self.imagePaddingSpinBox.setMaximum(6)
-        self.imagePaddingSpinBox.setValue(4)
-
-        self.toolsLayoutGrid.addWidget(self.imagePaddingSpinBox, 17, 1, 1, 1)
-
-        self.removeAverageDataPushbutton = QPushButton(self.toolsLayoutFrame)
-        self.removeAverageDataPushbutton.setObjectName(u"removeAverageDataPushbutton")
-
-        self.toolsLayoutGrid.addWidget(self.removeAverageDataPushbutton, 8, 0, 1, 2)
-
-        self.label_7 = QLabel(self.toolsLayoutFrame)
-        self.label_7.setObjectName(u"label_7")
-        self.label_7.setIndent(5)
-
-        self.toolsLayoutGrid.addWidget(self.label_7, 17, 0, 1, 1)
-
-        self.shadowLimitSpinBox = QSpinBox(self.toolsLayoutFrame)
-        self.shadowLimitSpinBox.setObjectName(u"shadowLimitSpinBox")
-        self.shadowLimitSpinBox.setValue(6)
-
-        self.toolsLayoutGrid.addWidget(self.shadowLimitSpinBox, 12, 1, 1, 1)
-
-        self.processImagesPushbutton = QPushButton(self.toolsLayoutFrame)
-        self.processImagesPushbutton.setObjectName(u"processImagesPushbutton")
-        self.processImagesPushbutton.setMinimumSize(QSize(100, 40))
-
-        self.toolsLayoutGrid.addWidget(self.processImagesPushbutton, 27, 0, 1, 2)
-
-        self.previewChartPushbutton = QPushButton(self.toolsLayoutFrame)
-        self.previewChartPushbutton.setObjectName(u"previewChartPushbutton")
-
-        self.toolsLayoutGrid.addWidget(self.previewChartPushbutton, 2, 0, 1, 2)
-
-        self.imageProcessingThreadsSpinbox = QSpinBox(self.toolsLayoutFrame)
-        self.imageProcessingThreadsSpinbox.setObjectName(u"imageProcessingThreadsSpinbox")
-        self.imageProcessingThreadsSpinbox.setMinimum(1)
-        self.imageProcessingThreadsSpinbox.setValue(4)
-
-        self.toolsLayoutGrid.addWidget(self.imageProcessingThreadsSpinbox, 26, 1, 1, 1)
-
-        self.verticalSpacer_2 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Maximum)
-
-        self.toolsLayoutGrid.addItem(self.verticalSpacer_2, 4, 0, 1, 2)
-
-        self.label_4 = QLabel(self.toolsLayoutFrame)
-        self.label_4.setObjectName(u"label_4")
-        self.label_4.setMargin(5)
-        self.label_4.setIndent(5)
-
-        self.toolsLayoutGrid.addWidget(self.label_4, 26, 0, 1, 1)
-
-        self.label_3 = QLabel(self.toolsLayoutFrame)
-        self.label_3.setObjectName(u"label_3")
-        self.label_3.setFont(font)
-        self.label_3.setAlignment(Qt.AlignCenter)
-
-        self.toolsLayoutGrid.addWidget(self.label_3, 14, 0, 1, 2)
-
-        self.label_10 = QLabel(self.toolsLayoutFrame)
-        self.label_10.setObjectName(u"label_10")
-        self.label_10.setFont(font)
-        self.label_10.setAlignment(Qt.AlignCenter)
-
-        self.toolsLayoutGrid.addWidget(self.label_10, 0, 0, 1, 2)
+        self.toolsLayoutGrid.addWidget(self.label_9, 5, 0, 1, 2)
 
         self.imageFormatComboBox = QComboBox(self.toolsLayoutFrame)
         self.imageFormatComboBox.setObjectName(u"imageFormatComboBox")
 
-        self.toolsLayoutGrid.addWidget(self.imageFormatComboBox, 22, 0, 1, 2)
+        self.toolsLayoutGrid.addWidget(self.imageFormatComboBox, 21, 1, 1, 1)
 
-        self.verticalSpacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        self.newImageNameLineEdit = QLineEdit(self.toolsLayoutFrame)
+        self.newImageNameLineEdit.setObjectName(u"newImageNameLineEdit")
 
-        self.toolsLayoutGrid.addItem(self.verticalSpacer, 28, 0, 1, 2)
+        self.toolsLayoutGrid.addWidget(self.newImageNameLineEdit, 15, 0, 1, 2)
 
-        self.highlightLimitSpinBox = QSpinBox(self.toolsLayoutFrame)
-        self.highlightLimitSpinBox.setObjectName(u"highlightLimitSpinBox")
-        self.highlightLimitSpinBox.setValue(96)
+        self.exrOptionsFrame = QFrame(self.toolsLayoutFrame)
+        self.exrOptionsFrame.setObjectName(u"exrOptionsFrame")
+        self.exrOptionsFrame.setFrameShape(QFrame.StyledPanel)
+        self.exrOptionsFrame.setFrameShadow(QFrame.Raised)
+        self.horizontalLayout_7 = QHBoxLayout(self.exrOptionsFrame)
+        self.horizontalLayout_7.setSpacing(0)
+        self.horizontalLayout_7.setObjectName(u"horizontalLayout_7")
+        self.horizontalLayout_7.setContentsMargins(0, 0, 0, 0)
+        self.label_15 = QLabel(self.exrOptionsFrame)
+        self.label_15.setObjectName(u"label_15")
+        self.label_15.setIndent(9)
 
-        self.toolsLayoutGrid.addWidget(self.highlightLimitSpinBox, 11, 1, 1, 1)
+        self.horizontalLayout_7.addWidget(self.label_15)
 
-        self.verticalSpacer_3 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Maximum)
+        self.exrColourSpaceComboBox = QComboBox(self.exrOptionsFrame)
+        self.exrColourSpaceComboBox.setObjectName(u"exrColourSpaceComboBox")
 
-        self.toolsLayoutGrid.addItem(self.verticalSpacer_3, 13, 0, 1, 2)
+        self.horizontalLayout_7.addWidget(self.exrColourSpaceComboBox)
 
-        self.exportMaskedImagesCheckBox = QCheckBox(self.toolsLayoutFrame)
-        self.exportMaskedImagesCheckBox.setObjectName(u"exportMaskedImagesCheckBox")
 
-        self.toolsLayoutGrid.addWidget(self.exportMaskedImagesCheckBox, 10, 0, 1, 2)
-
-        self.manuallySelectChartPushbutton = QPushButton(self.toolsLayoutFrame)
-        self.manuallySelectChartPushbutton.setObjectName(u"manuallySelectChartPushbutton")
-
-        self.toolsLayoutGrid.addWidget(self.manuallySelectChartPushbutton, 3, 0, 1, 2)
-
-        self.displayDebugExposureDataCheckBox = QCheckBox(self.toolsLayoutFrame)
-        self.displayDebugExposureDataCheckBox.setObjectName(u"displayDebugExposureDataCheckBox")
-
-        self.toolsLayoutGrid.addWidget(self.displayDebugExposureDataCheckBox, 9, 0, 1, 2)
-
-        self.label_11 = QLabel(self.toolsLayoutFrame)
-        self.label_11.setObjectName(u"label_11")
-        self.label_11.setFont(font)
-        self.label_11.setAlignment(Qt.AlignCenter)
-
-        self.toolsLayoutGrid.addWidget(self.label_11, 19, 0, 1, 2)
-
-        self.verticalSpacer_4 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Maximum)
-
-        self.toolsLayoutGrid.addItem(self.verticalSpacer_4, 18, 0, 1, 2)
-
-        self.label_12 = QLabel(self.toolsLayoutFrame)
-        self.label_12.setObjectName(u"label_12")
-
-        self.toolsLayoutGrid.addWidget(self.label_12, 11, 0, 1, 1)
+        self.toolsLayoutGrid.addWidget(self.exrOptionsFrame, 24, 0, 1, 2)
 
         self.bitDepthFrame = QFrame(self.toolsLayoutFrame)
         self.bitDepthFrame.setObjectName(u"bitDepthFrame")
@@ -243,28 +115,164 @@ class Ui_MainWindow(object):
         self.horizontalLayout_6.addWidget(self.sixteenBitRadioButton)
 
 
-        self.toolsLayoutGrid.addWidget(self.bitDepthFrame, 23, 0, 1, 2)
+        self.toolsLayoutGrid.addWidget(self.bitDepthFrame, 22, 0, 1, 2)
 
-        self.exrOptionsFrame = QFrame(self.toolsLayoutFrame)
-        self.exrOptionsFrame.setObjectName(u"exrOptionsFrame")
-        self.exrOptionsFrame.setFrameShape(QFrame.StyledPanel)
-        self.exrOptionsFrame.setFrameShadow(QFrame.Raised)
-        self.horizontalLayout_7 = QHBoxLayout(self.exrOptionsFrame)
-        self.horizontalLayout_7.setSpacing(0)
-        self.horizontalLayout_7.setObjectName(u"horizontalLayout_7")
-        self.horizontalLayout_7.setContentsMargins(5, 0, 0, 0)
-        self.label_15 = QLabel(self.exrOptionsFrame)
-        self.label_15.setObjectName(u"label_15")
+        self.calculateAverageExposurePushbutton = QPushButton(self.toolsLayoutFrame)
+        self.calculateAverageExposurePushbutton.setObjectName(u"calculateAverageExposurePushbutton")
 
-        self.horizontalLayout_7.addWidget(self.label_15)
+        self.toolsLayoutGrid.addWidget(self.calculateAverageExposurePushbutton, 6, 0, 1, 2)
 
-        self.exrColourSpaceComboBox = QComboBox(self.exrOptionsFrame)
-        self.exrColourSpaceComboBox.setObjectName(u"exrColourSpaceComboBox")
+        self.jpgQualityFrame = QFrame(self.toolsLayoutFrame)
+        self.jpgQualityFrame.setObjectName(u"jpgQualityFrame")
+        self.jpgQualityFrame.setFrameShape(QFrame.StyledPanel)
+        self.jpgQualityFrame.setFrameShadow(QFrame.Raised)
+        self.horizontalLayout_4 = QHBoxLayout(self.jpgQualityFrame)
+        self.horizontalLayout_4.setSpacing(0)
+        self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
+        self.horizontalLayout_4.setContentsMargins(0, 0, 0, 0)
+        self.label_14 = QLabel(self.jpgQualityFrame)
+        self.label_14.setObjectName(u"label_14")
+        self.label_14.setMinimumSize(QSize(80, 0))
+        self.label_14.setAlignment(Qt.AlignLeading|Qt.AlignLeft|Qt.AlignVCenter)
+        self.label_14.setMargin(0)
+        self.label_14.setIndent(9)
 
-        self.horizontalLayout_7.addWidget(self.exrColourSpaceComboBox)
+        self.horizontalLayout_4.addWidget(self.label_14)
+
+        self.jpegQualitySpinbox_2 = QSpinBox(self.jpgQualityFrame)
+        self.jpegQualitySpinbox_2.setObjectName(u"jpegQualitySpinbox_2")
+        self.jpegQualitySpinbox_2.setMinimum(10)
+        self.jpegQualitySpinbox_2.setMaximum(100)
+        self.jpegQualitySpinbox_2.setSingleStep(10)
+        self.jpegQualitySpinbox_2.setValue(100)
+
+        self.horizontalLayout_4.addWidget(self.jpegQualitySpinbox_2)
 
 
-        self.toolsLayoutGrid.addWidget(self.exrOptionsFrame, 25, 0, 1, 2)
+        self.toolsLayoutGrid.addWidget(self.jpgQualityFrame, 23, 0, 1, 2)
+
+        self.setSelectedAsChartPushbutton = QPushButton(self.toolsLayoutFrame)
+        self.setSelectedAsChartPushbutton.setObjectName(u"setSelectedAsChartPushbutton")
+
+        self.toolsLayoutGrid.addWidget(self.setSelectedAsChartPushbutton, 1, 0, 1, 2)
+
+        self.imagePaddingSpinBox = QSpinBox(self.toolsLayoutFrame)
+        self.imagePaddingSpinBox.setObjectName(u"imagePaddingSpinBox")
+        self.imagePaddingSpinBox.setMaximum(6)
+        self.imagePaddingSpinBox.setValue(4)
+
+        self.toolsLayoutGrid.addWidget(self.imagePaddingSpinBox, 16, 1, 1, 1)
+
+        self.removeAverageDataPushbutton = QPushButton(self.toolsLayoutFrame)
+        self.removeAverageDataPushbutton.setObjectName(u"removeAverageDataPushbutton")
+
+        self.toolsLayoutGrid.addWidget(self.removeAverageDataPushbutton, 7, 0, 1, 2)
+
+        self.label_7 = QLabel(self.toolsLayoutFrame)
+        self.label_7.setObjectName(u"label_7")
+        self.label_7.setIndent(8)
+
+        self.toolsLayoutGrid.addWidget(self.label_7, 16, 0, 1, 1)
+
+        self.shadowLimitSpinBox = QSpinBox(self.toolsLayoutFrame)
+        self.shadowLimitSpinBox.setObjectName(u"shadowLimitSpinBox")
+        self.shadowLimitSpinBox.setValue(6)
+
+        self.toolsLayoutGrid.addWidget(self.shadowLimitSpinBox, 11, 1, 1, 1)
+
+        self.label_16 = QLabel(self.toolsLayoutFrame)
+        self.label_16.setObjectName(u"label_16")
+        self.label_16.setIndent(9)
+
+        self.toolsLayoutGrid.addWidget(self.label_16, 21, 0, 1, 1)
+
+        self.processImagesPushbutton = QPushButton(self.toolsLayoutFrame)
+        self.processImagesPushbutton.setObjectName(u"processImagesPushbutton")
+        self.processImagesPushbutton.setMinimumSize(QSize(100, 40))
+
+        self.toolsLayoutGrid.addWidget(self.processImagesPushbutton, 26, 0, 1, 2)
+
+        self.imageProcessingThreadsSpinbox = QSpinBox(self.toolsLayoutFrame)
+        self.imageProcessingThreadsSpinbox.setObjectName(u"imageProcessingThreadsSpinbox")
+        self.imageProcessingThreadsSpinbox.setMinimum(1)
+        self.imageProcessingThreadsSpinbox.setValue(4)
+
+        self.toolsLayoutGrid.addWidget(self.imageProcessingThreadsSpinbox, 25, 1, 1, 1)
+
+        self.verticalSpacer_2 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Maximum)
+
+        self.toolsLayoutGrid.addItem(self.verticalSpacer_2, 3, 0, 1, 2)
+
+        self.label_4 = QLabel(self.toolsLayoutFrame)
+        self.label_4.setObjectName(u"label_4")
+        self.label_4.setMargin(5)
+        self.label_4.setIndent(5)
+
+        self.toolsLayoutGrid.addWidget(self.label_4, 25, 0, 1, 1)
+
+        self.label_3 = QLabel(self.toolsLayoutFrame)
+        self.label_3.setObjectName(u"label_3")
+        self.label_3.setFont(font)
+        self.label_3.setAlignment(Qt.AlignCenter)
+
+        self.toolsLayoutGrid.addWidget(self.label_3, 13, 0, 1, 2)
+
+        self.label_10 = QLabel(self.toolsLayoutFrame)
+        self.label_10.setObjectName(u"label_10")
+        self.label_10.setFont(font)
+        self.label_10.setAlignment(Qt.AlignCenter)
+
+        self.toolsLayoutGrid.addWidget(self.label_10, 0, 0, 1, 2)
+
+        self.verticalSpacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+
+        self.toolsLayoutGrid.addItem(self.verticalSpacer, 27, 0, 1, 2)
+
+        self.highlightLimitSpinBox = QSpinBox(self.toolsLayoutFrame)
+        self.highlightLimitSpinBox.setObjectName(u"highlightLimitSpinBox")
+        self.highlightLimitSpinBox.setValue(96)
+
+        self.toolsLayoutGrid.addWidget(self.highlightLimitSpinBox, 10, 1, 1, 1)
+
+        self.verticalSpacer_3 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Maximum)
+
+        self.toolsLayoutGrid.addItem(self.verticalSpacer_3, 12, 0, 1, 2)
+
+        self.exportMaskedImagesCheckBox = QCheckBox(self.toolsLayoutFrame)
+        self.exportMaskedImagesCheckBox.setObjectName(u"exportMaskedImagesCheckBox")
+
+        self.toolsLayoutGrid.addWidget(self.exportMaskedImagesCheckBox, 9, 0, 1, 2)
+
+        self.manuallySelectChartPushbutton = QPushButton(self.toolsLayoutFrame)
+        self.manuallySelectChartPushbutton.setObjectName(u"manuallySelectChartPushbutton")
+
+        self.toolsLayoutGrid.addWidget(self.manuallySelectChartPushbutton, 2, 0, 1, 2)
+
+        self.displayDebugExposureDataCheckBox = QCheckBox(self.toolsLayoutFrame)
+        self.displayDebugExposureDataCheckBox.setObjectName(u"displayDebugExposureDataCheckBox")
+        self.displayDebugExposureDataCheckBox.setSizeIncrement(QSize(0, 0))
+        font1 = QFont()
+        font1.setPointSize(9)
+        self.displayDebugExposureDataCheckBox.setFont(font1)
+
+        self.toolsLayoutGrid.addWidget(self.displayDebugExposureDataCheckBox, 8, 0, 1, 2)
+
+        self.label_11 = QLabel(self.toolsLayoutFrame)
+        self.label_11.setObjectName(u"label_11")
+        self.label_11.setFont(font)
+        self.label_11.setAlignment(Qt.AlignCenter)
+
+        self.toolsLayoutGrid.addWidget(self.label_11, 18, 0, 1, 2)
+
+        self.verticalSpacer_4 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Maximum)
+
+        self.toolsLayoutGrid.addItem(self.verticalSpacer_4, 17, 0, 1, 2)
+
+        self.label_12 = QLabel(self.toolsLayoutFrame)
+        self.label_12.setObjectName(u"label_12")
+        self.label_12.setIndent(9)
+
+        self.toolsLayoutGrid.addWidget(self.label_12, 10, 0, 1, 1)
 
 
         self.verticalLayout.addLayout(self.toolsLayoutGrid)
@@ -366,9 +374,9 @@ class Ui_MainWindow(object):
 
         self.label = QLabel(self.frame)
         self.label.setObjectName(u"label")
-        font1 = QFont()
-        font1.setBold(True)
-        self.label.setFont(font1)
+        font2 = QFont()
+        font2.setBold(True)
+        self.label.setFont(font2)
         self.label.setAlignment(Qt.AlignCenter)
 
         self.verticalLayout_2.addWidget(self.label)
@@ -384,6 +392,9 @@ class Ui_MainWindow(object):
         self.processingStatusProgressBar = QProgressBar(self.processingStatusBarFrame)
         self.processingStatusProgressBar.setObjectName(u"processingStatusProgressBar")
         self.processingStatusProgressBar.setMaximumSize(QSize(16777215, 10))
+        font3 = QFont()
+        font3.setPointSize(7)
+        self.processingStatusProgressBar.setFont(font3)
         self.processingStatusProgressBar.setValue(24)
         self.processingStatusProgressBar.setOrientation(Qt.Horizontal)
 
@@ -404,9 +415,7 @@ class Ui_MainWindow(object):
         self.cpuUsageProgressBar = QProgressBar(self.frame)
         self.cpuUsageProgressBar.setObjectName(u"cpuUsageProgressBar")
         self.cpuUsageProgressBar.setMaximumSize(QSize(16777215, 10))
-        font2 = QFont()
-        font2.setPointSize(7)
-        self.cpuUsageProgressBar.setFont(font2)
+        self.cpuUsageProgressBar.setFont(font3)
         self.cpuUsageProgressBar.setValue(24)
 
         self.verticalLayout_3.addWidget(self.cpuUsageProgressBar)
@@ -414,7 +423,7 @@ class Ui_MainWindow(object):
         self.memoryUsageProgressBar = QProgressBar(self.frame)
         self.memoryUsageProgressBar.setObjectName(u"memoryUsageProgressBar")
         self.memoryUsageProgressBar.setMaximumSize(QSize(16777215, 10))
-        self.memoryUsageProgressBar.setFont(font2)
+        self.memoryUsageProgressBar.setFont(font3)
         self.memoryUsageProgressBar.setValue(24)
 
         self.verticalLayout_3.addWidget(self.memoryUsageProgressBar)
@@ -594,6 +603,9 @@ class Ui_MainWindow(object):
         self.newImageNameLineEdit.setToolTip(QCoreApplication.translate("MainWindow", u"New Image Name, will be followed by _0001, numbers are based on padding length", None))
 #endif // QT_CONFIG(tooltip)
         self.newImageNameLineEdit.setText(QCoreApplication.translate("MainWindow", u"Image", None))
+        self.label_15.setText(QCoreApplication.translate("MainWindow", u"Color Space", None))
+        self.eightBitRadioButton.setText(QCoreApplication.translate("MainWindow", u"8 bit", None))
+        self.sixteenBitRadioButton.setText(QCoreApplication.translate("MainWindow", u"16 bit", None))
         self.calculateAverageExposurePushbutton.setText(QCoreApplication.translate("MainWindow", u"Calculate Average Exposure", None))
         self.label_14.setText(QCoreApplication.translate("MainWindow", u"Jpeg Quality", None))
         self.setSelectedAsChartPushbutton.setText(QCoreApplication.translate("MainWindow", u"Set Selected As Chart", None))
@@ -605,8 +617,8 @@ class Ui_MainWindow(object):
 #endif // QT_CONFIG(whatsthis)
         self.removeAverageDataPushbutton.setText(QCoreApplication.translate("MainWindow", u"Remove Average Data", None))
         self.label_7.setText(QCoreApplication.translate("MainWindow", u"Padding", None))
+        self.label_16.setText(QCoreApplication.translate("MainWindow", u"Format", None))
         self.processImagesPushbutton.setText(QCoreApplication.translate("MainWindow", u"Process Images", None))
-        self.previewChartPushbutton.setText(QCoreApplication.translate("MainWindow", u"Preview Chart Image", None))
         self.label_4.setText(QCoreApplication.translate("MainWindow", u"Threads", None))
         self.label_3.setText(QCoreApplication.translate("MainWindow", u"New Image Name", None))
         self.label_10.setText(QCoreApplication.translate("MainWindow", u"Colour Chart Tools", None))
@@ -618,9 +630,6 @@ class Ui_MainWindow(object):
         self.displayDebugExposureDataCheckBox.setText(QCoreApplication.translate("MainWindow", u"Display debug data", None))
         self.label_11.setText(QCoreApplication.translate("MainWindow", u"Processing and Export", None))
         self.label_12.setText(QCoreApplication.translate("MainWindow", u"Highlight Limit", None))
-        self.eightBitRadioButton.setText(QCoreApplication.translate("MainWindow", u"8 bit", None))
-        self.sixteenBitRadioButton.setText(QCoreApplication.translate("MainWindow", u"16 bit", None))
-        self.label_15.setText(QCoreApplication.translate("MainWindow", u"colorspace", None))
         self.label_8.setText(QCoreApplication.translate("MainWindow", u"Chart Image", None))
         self.browseForChartPushbutton.setText(QCoreApplication.translate("MainWindow", u"Browse", None))
         self.label_2.setText(QCoreApplication.translate("MainWindow", u"Raw Image Directory", None))
