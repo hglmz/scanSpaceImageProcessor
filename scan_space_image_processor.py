@@ -351,17 +351,13 @@ class ImageCorrectionWorker(QRunnable):
 
                 self.signals.log.emit(f"[Saved] {out_path}")
 
-                # ─── Copy ALL metadata from RAW → output via OIIO ────────────────────
                 in_img = ImageInput.open(img_path)
                 if in_img:
                     src_pvs = in_img.spec().extra_attribs  # ParamValueList of all tags
                     in_img.close()
-                    print(f"[Metadata] Read {len(src_pvs)} tags from {img_path}", flush=True)
                 else:
                     src_pvs = []
-                    print(f"[Metadata ERROR] Could not read metadata from {img_path}", flush=True)
 
-                # Get or build an ImageSpec for the file you just wrote
                 out_reader = ImageInput.open(out_path)
                 if out_reader:
                     out_spec = out_reader.spec()
@@ -375,7 +371,6 @@ class ImageCorrectionWorker(QRunnable):
                         channels = corrected_uint8.shape[2] if corrected_uint8.ndim == 3 else 1
                         out_spec = ImageSpec(w, h, channels, TypeDesc.UINT8)
 
-                # Inject every tag into the output spec
                 for pv in src_pvs:
                     name = pv.name
                     val = pv.value
@@ -385,7 +380,6 @@ class ImageCorrectionWorker(QRunnable):
                         out_spec.attribute(name, str(val))
                 print(f"[Metadata] Injected {len(src_pvs)} tags into spec for {out_path}", flush=True)
 
-                # Rewrite the file in-place so it carries those tags
                 writer = ImageOutput.create(out_path)
                 if not writer:
                     print(f"[Metadata ERROR] Could not open writer for {out_path}", flush=True)
@@ -399,7 +393,6 @@ class ImageCorrectionWorker(QRunnable):
                     writer.close()
                     print(f"[Metadata] Wrote {out_path} with embedded metadata", flush=True)
 
-                # emit an array directly for preview
                 data = [corrected_uint8, out_path]
                 self.signals.preview.emit(data)
                 self.signals.status.emit(img_path, 'finished', (time.time() - local_timer_start), out_path)
@@ -468,7 +461,6 @@ class MainWindow(QMainWindow):
             self.ui.detectChartShelfPushbutton,
             self.ui.showOriginalImagePushbutton,
             self.ui.flattenChartImagePushButton,
-            self.ui.previewChartPushbutton,
             self.ui.finalizeChartPushbutton
         ):
             btn.setEnabled(False)
@@ -575,7 +567,6 @@ class MainWindow(QMainWindow):
         ui.imagesListWidget.itemSelectionChanged.connect(self.preview_selected)
         ui.imagesListWidget.currentRowChanged.connect(self.update_thumbnail_strip)
 
-        ui.previewChartPushbutton.clicked.connect(self.detect_chart)
         ui.manuallySelectChartPushbutton.clicked.connect(self.manually_select_chart)
         ui.detectChartShelfPushbutton.clicked.connect(
             lambda: self.detect_chart(input_source=ui.chartPathLineEdit.text(), is_npy=False)
