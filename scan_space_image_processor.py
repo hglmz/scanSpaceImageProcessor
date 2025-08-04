@@ -26,7 +26,8 @@ from colour_checker_detection import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QListWidgetItem,
     QGraphicsScene, QGraphicsPixmapItem, QProgressBar, QGraphicsTextItem, QLabel, QRubberBand, QGraphicsEllipseItem,
-    QPushButton, QRadioButton, QButtonGroup, QHBoxLayout, QSizePolicy, QWidget, QGraphicsRectItem, QMessageBox
+    QPushButton, QRadioButton, QButtonGroup, QHBoxLayout, QSizePolicy, QWidget, QGraphicsRectItem, QMessageBox,
+    QGraphicsView
 )
 from PySide6.QtCore import (
     QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, QSize, QEventLoop
@@ -501,6 +502,8 @@ class MainWindow(QMainWindow):
         self.chart_swatches         = None
         self.temp_swatches          = []
         self.flatten_swatch_rects   = None
+        self.average_enabled = False
+        self.selected_average_source = None
 
         # Mode flags
         self.manual_selection_mode  = False
@@ -590,6 +593,7 @@ class MainWindow(QMainWindow):
 
         ui.nextImagePushbutton.clicked.connect(self.select_next_image)
         ui.previousImagePushbutton.clicked.connect(self.select_previous_image)
+        ui.setSelectedImageAsAveragePushbutton.clicked.connect(self.set_selected_image_as_average_source)
 
         # ────────────────────────────────────────────────────────────
         # 9) Event Filters & Focus
@@ -623,6 +627,10 @@ class MainWindow(QMainWindow):
             self.cancel_processing()
 
     def browse_chart(self):
+        """
+        Open a file dialog to select a RAW chart file.
+        On selection, update the chart‐path line edit and log the choice.
+        """
         default = self.ui.chartPathLineEdit.text() or os.getcwd()
         path, _ = QFileDialog.getOpenFileName(
             self, 'Select Chart Image', default,
@@ -682,6 +690,11 @@ class MainWindow(QMainWindow):
 
     @exit_manual_mode
     def browse_images(self):
+        """
+        Open a directory dialog to select a folder of RAW images.
+        Clears any previous state, populates the image list widget with all supported RAW files,
+        and stores the chosen folder in settings.
+        """
         self.reset_all_state()
         default = self.ui.rawImagesDirectoryLineEdit.text() or os.getcwd()
         folder = QFileDialog.getExistingDirectory(self, 'Select Raw Image Directory', default)
@@ -728,6 +741,10 @@ class MainWindow(QMainWindow):
             self.ui.imagesListWidget.setCurrentRow(0)
 
     def browse_output_directory(self):
+        """
+        Open a directory dialog to select where processed images will be saved.
+        Updates the output‐directory line edit and persists the choice in settings.
+        """
         default = self.ui.outputDirectoryLineEdit.text() or os.getcwd()
         folder = QFileDialog.getExistingDirectory(self, 'Select Output Directory', default)
         if folder:
@@ -749,6 +766,11 @@ class MainWindow(QMainWindow):
         self.ui.exrOptionsFrame.setVisible(fmt == '.exr')
 
     def set_selected_as_chart(self):
+        """
+        Mark the currently selected image in the list as the reference colour chart.
+        Clears any prior chart flags, sets the 'chart' metadata on the new selection,
+        updates the chart‐path line edit, enables manual selection, and triggers detection.
+        """
         # Clear previous chart assignments
         for i in range(self.ui.imagesListWidget.count()):
             item = self.ui.imagesListWidget.item(i)
@@ -770,6 +792,11 @@ class MainWindow(QMainWindow):
 
     @exit_manual_mode
     def preview_selected(self):
+        """
+        Show a preview of the currently selected image (either input or processed).
+        Toggles debug‐frame visibility if this image is the reference chart,
+        and updates exposure debug overlay if enabled.
+        """
         item = self.ui.imagesListWidget.currentItem()
         if not item:
             self.show_debug_frame(False)
@@ -793,49 +820,51 @@ class MainWindow(QMainWindow):
             self.show_exposure_debug_overlay()
 
     def preview_thumbnail(self, path):
-        exists = os.path.exists(path)
-        # self.log(f"[Debug] exists: {exists}")
-        real = os.path.realpath(path)
-        # self.log(f"[Debug] realpath: {real}")
-        ext = os.path.splitext(path)[1].lower()
-        pixmap = None
+        """
+        Load and display a thumbnail for the given file path.
+        Uses cached pixmap if available, applies exposure adjustment,
+        and supports fallback for common formats and RAW thumbnails.
+        """
+        # Try cache first
+        cache = self.thumbnail_cache.get(path, {})
+        pixmap = cache.get('pixmap') if cache else None
 
-        if ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp'):
-            img = QImage(path.replace('\\', '/'))
-            if not img.isNull():
-                pixmap = QPixmap.fromImage(img)
-            else:
-                # self.log("[Preview] QImage failed for non-RAW file, trying PIL fallback")
-                try:
-                    pil = Image.open(path).convert("RGBA")
-                    data = pil.tobytes("raw", "RGBA")
-                    w, h = pil.size
-                    img2 = QImage(data, w, h, QImage.Format_RGBA8888)
-                    pixmap = QPixmap.fromImage(img2)
-                    # self.log("[Preview] PIL fallback successful")
-                except Exception as e:
-                    self.log(f"[Preview Error] PIL fallback failed: {e}")
-
-        # For RAW files, use thumbnail loader
-        elif ext in RAW_EXTENSIONS:
-            try:
-                arr = self.load_thumbnail_array(path, max_size=(512, 512))
-                if arr is not None:
-                    arr_uint8 = (arr * 255).astype(np.uint8)
-                    h, w, c = arr_uint8.shape
-                    img2 = QImage(arr_uint8.data, w, h, w * c, QImage.Format_RGB888)
-                    pixmap = QPixmap.fromImage(img2)
-                    # self.log("[Preview] RAW thumbnail loaded successfully")
-                else:
-                    raise Exception("load_thumbnail_array returned None")
-            except Exception as e:
-                self.log(f"[Preview Error] RAW load failed: {e}")
-
+        # If not in cache or invalid, load fresh
         if not pixmap or pixmap.isNull():
-            self.log("[Preview Error] could not load thumbnail or image")
-            return
+            ext = os.path.splitext(path)[1].lower()
+            if ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp'):
+                img = QImage(path.replace('\\', '/'))
+                if not img.isNull():
+                    pixmap = QPixmap.fromImage(img)
+            elif ext in RAW_EXTENSIONS:
+                try:
+                    arr = self.load_thumbnail_array(path, max_size=(512, 512))
+                    if arr is not None:
+                        arr_uint8 = (arr * 255).astype(np.uint8)
+                        h, w, c = arr_uint8.shape
+                        img2 = QImage(arr_uint8.data, w, h, w * c, QImage.Format_RGB888)
+                        pixmap = QPixmap.fromImage(img2)
+                except Exception as e:
+                    self.log(f"[Preview Error] RAW load failed: {e}")
 
-        # Display in the preview scene
+            if pixmap and not pixmap.isNull():
+                self.thumbnail_cache[path] = {'pixmap': pixmap}
+            else:
+                self.log("[Preview Error] could not load thumbnail or image")
+                return
+
+        # Apply exposure brightness if set
+        # Find corresponding list item to get metadata
+        for i in range(self.ui.imagesListWidget.count()):
+            item = self.ui.imagesListWidget.item(i)
+            meta = item.data(Qt.UserRole)
+            if meta.get('input_path') == path or meta.get('output_path') == path:
+                factor = meta.get('average_exposure', 1.0)
+                if factor != 1.0:
+                    pixmap = self._adjust_pixmap_brightness(pixmap, factor)
+                break
+
+        # Show in preview scene
         self.previewScene.clear()
         self.previewScene.addItem(QGraphicsPixmapItem(pixmap))
         self.ui.imagePreviewGraphicsView.resetTransform()
@@ -843,10 +872,13 @@ class MainWindow(QMainWindow):
             self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio
         )
         self.current_image_pixmap = pixmap
-        # self.log(f"[Preview] Displayed preview for {path}")
 
     @exit_manual_mode
     def start_processing(self):
+        """
+        Launch background workers to process every image in the list;
+        switches the UI into 'processing' mode and shows the progress frame.
+        """
         self.active_workers.clear()
         inf = self.ui.rawImagesDirectoryLineEdit.text().strip()
         outf = self.ui.outputDirectoryLineEdit.text().strip() or os.getcwd()
@@ -947,6 +979,10 @@ class MainWindow(QMainWindow):
             self.threadpool.start(worker)
 
     def cancel_processing(self):
+        """
+        Signal all active workers to cancel, reset the processing UI,
+        and revert the 'Process' button to its original state.
+        """
         self.threadpool.clear()
         for worker in self.active_workers:
             if hasattr(worker, "cancel"):
@@ -999,6 +1035,10 @@ class MainWindow(QMainWindow):
                 self.processing_complete()
 
     def processing_complete(self):
+        """
+        Called when all images are finished (or cancelled).
+        Hides the progress frame, resets the 'Process' button, and logs completion.
+        """
         self.processing_active = False
         self.ui.processingStatusBarFrame.setVisible(False)
         self.ui.processImagesPushbutton.setText("Process Images")
@@ -1006,6 +1046,10 @@ class MainWindow(QMainWindow):
         self.log("[Processing] All processing complete.")
 
     def _from_worker_preview(self, data):
+        """
+        Displays a provided npy image array from the image processing worker
+        Called whenever an image finishes processing
+        """
         # Handle array or path
         if isinstance(data, (list, tuple)) and len(data) == 2:
             image_data, image_path = data
@@ -1041,6 +1085,10 @@ class MainWindow(QMainWindow):
             self.show_preview(image_path)
 
     def show_preview(self, image_path):
+        """
+        Called when when an image is selected and a thumbnail or image object in memory does not exist for the image
+        Loads image from disk using its path
+        """
         path = os.path.normpath(image_path)
         # self.log(f"[Preview] Loading processed image: {path}")
         exists = os.path.exists(path)
@@ -1061,14 +1109,13 @@ class MainWindow(QMainWindow):
             print("QPixmap conversion failed after fallback")
             return
 
-        pw, ph = pixmap.width(), pixmap.height()
-        vw = self.ui.imagePreviewGraphicsView.viewport().width()
-        vh = self.ui.imagePreviewGraphicsView.viewport().height()
-        # self.log(f"[Debug] Pixmap size: {pw}x{ph}, Viewport: {vw}x{vh}")
         self._display_preview(pixmap)
-        # self.log("[Preview] Displayed processed image")
 
     def _display_preview(self, pixmap):
+        """
+        clears the preview scene and displays the provided pixmap
+        """
+        self.current_image_pixmap = pixmap
         self.previewScene.clear()
         self.previewScene.addItem(QGraphicsPixmapItem(pixmap))
         self.ui.imagePreviewGraphicsView.resetTransform()
@@ -1077,6 +1124,9 @@ class MainWindow(QMainWindow):
 
 
     def update_system_usage(self):
+        """
+        Updates the sytem usage progress bars with current values based on the QTimer created in __init__
+        """
         cpu = psutil.cpu_percent(None)
         self.ui.cpuUsageProgressBar.setValue(cpu)
         # show text on progress bar
@@ -1098,6 +1148,10 @@ class MainWindow(QMainWindow):
             self.memoryWarningLabel.setText('')
 
     def get_usage_style(self, pct):
+        """
+        sets the stylesheet for the usage bar
+        Uses colours depending on the percentage
+        """
         if pct < 50:
             c = "#4caf50"
         elif pct < 80:
@@ -1139,12 +1193,16 @@ class MainWindow(QMainWindow):
         return result['fp']
 
     def extract_chart_swatches(self, chart_path):
+        """
+        Load a RAW or numpy chart file, detect the 24 swatch colours,
+        save them to a temporary .npy file, and return (swatches, filename).
+        """
         img = self.load_raw_image(chart_path)
 
         if img is None:
             return None, None
 
-        for result in detect_colour_checkers_segmentation(img, additional_data=True):
+        for result in detect_colour_checkers_segmentation(img, additional_data=True, swatch_area_minimum_area_factor=20):
             swatches = result.swatch_colours
             if isinstance(swatches, np.ndarray) and swatches.shape == (24, 3):
                 tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.npy')
@@ -1189,15 +1247,7 @@ class MainWindow(QMainWindow):
             self.ui.showOriginalImagePushbutton.setText("Show Chart Preview")
 
         # 5) Disable & reset style of all chart‐tools buttons
-        for btn in (
-                self.ui.manuallySelectChartPushbutton,
-                self.ui.detectChartShelfPushbutton,
-                self.ui.flattenChartImagePushButton,
-                self.ui.showOriginalImagePushbutton,
-                self.ui.finalizeChartPushbutton
-        ):
-            btn.setEnabled(False)
-            btn.setStyleSheet("")
+        self._set_chart_tools_enabled()
 
         # 6) Hide the tool‐shelf & instruction overlay
         self.ui.detectChartToolshelfFrame.setVisible(False)
@@ -1207,65 +1257,67 @@ class MainWindow(QMainWindow):
         # 7) Hide debug frame if present
         self.show_debug_frame(False)
 
+    def _set_chart_tools_enabled(self, *, manual=False, detect=False, show=False, flatten=False, finalize=False):
+        """
+        Enable or disable all chart-tools buttons with optional highlight on Manual & Flatten.
+        """
+        mapping = {
+            'manual':   self.ui.manuallySelectChartPushbutton,
+            'detect':   self.ui.detectChartShelfPushbutton,
+            'show':     self.ui.showOriginalImagePushbutton,
+            'flatten':  self.ui.flattenChartImagePushButton,
+            'finalize': self.ui.finalizeChartPushbutton,
+        }
+        for key, btn in mapping.items():
+            enabled = locals()[key]
+            btn.setEnabled(enabled)
+            # highlight Manual & Flatten when active
+            if (key == 'manual' and enabled) or (key == 'flatten' and enabled):
+                btn.setStyleSheet("background-color: #A5D6A7")
+            else:
+                btn.setStyleSheet("")
+
     @exit_manual_mode
     def manually_select_chart(self):
         """
         Enter manual chart selection mode:
-          1) Load RAW thumbnail and full-precision image.
-          2) Reset UI (hide debug, rubber-band, disable buttons).
-          3) Show instruction label.
-          4) Show the chart-tools shelf, style only the Manual-Select button.
-          5) Enable manual-selection mode; Flatten remains disabled until crop.
+          - Load RAW + thumbnail, reset UI, show instructions, enable only Manual-Select.
         """
         path = self.ui.chartPathLineEdit.text().strip()
         if not path:
             self.log('[Manual] No chart selected')
             return
-        # self.log(f'[Manual] Loading chart for manual selection: {path}')
-
-        # Load full-precision float32 image
         full_fp = self.load_raw_image(path)
         if full_fp is None:
             self.log(f'[Manual] RAW load failed: {path}')
             return
         self.fp_image_array = full_fp
 
-        # Create an 8-bit thumbnail from full_fp
+        # build 8-bit thumbnail
         thumb_arr = np.uint8(255 * np.clip(full_fp, 0.0, 1.0))
-
-        # Display the thumbnail
         h, w, _ = thumb_arr.shape
         bytes_per_line = w * 3
         qimg = QImage(thumb_arr.data, w, h, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimg)
         self.original_preview_pixmap = pixmap
-        self.current_image_pixmap = pixmap
-        self.previewScene.clear()
-        self.previewScene.addItem(QGraphicsPixmapItem(pixmap))
-        self.ui.imagePreviewGraphicsView.resetTransform()
-        self.ui.imagePreviewGraphicsView.fitInView(
-            self.previewScene.itemsBoundingRect(),
-            Qt.KeepAspectRatio
-        )
+        self.current_image_pixmap  = pixmap
+        self._display_preview(pixmap)
 
-        # 2) Reset the UI: hide debug, rubber-band, disable all chart-tools buttons
+        # Reset modes and hide overlays/debug
+        self.manual_selection_mode = True
+        self.flatten_mode          = False
         self.show_debug_frame(False)
         if hasattr(self, 'rubberBand') and self.rubberBand.isVisible():
             self.rubberBand.hide()
-        for btn in (
-                self.ui.manuallySelectChartPushbutton,
-                self.ui.detectChartShelfPushbutton,
-                self.ui.showOriginalImagePushbutton,
-                self.ui.flattenChartImagePushButton,
-                self.ui.finalizeChartPushbutton
-        ):
-            btn.setEnabled(False)
-            btn.setStyleSheet("")
 
-        # 3) Instruction label
-        if self.instruction_label:
-            self.instruction_label.setText("Click and drag box around the colour chart")
-            self.instruction_label.show()
+        # Reset and enable only the Manual-Select button
+        self._set_chart_tools_enabled(manual=True)
+
+        # Show instruction label
+        instr = getattr(self, 'instruction_label', None)
+        if isinstance(instr, QLabel):
+            instr.setText("Click and drag box around the colour chart")
+            instr.show()
         else:
             self.instruction_label = QLabel("Click and drag box around the colour chart")
             self.instruction_label.setAlignment(Qt.AlignCenter)
@@ -1273,31 +1325,27 @@ class MainWindow(QMainWindow):
                 self.ui.verticalLayout_4.indexOf(self.ui.imagePreviewGraphicsView),
                 self.instruction_label
             )
-
-        # 4) Show the tools shelf and style the Manual-Select button
+        # Reveal toolshelf
         self.ui.detectChartToolshelfFrame.setVisible(True)
-        css = "background-color: #A5D6A7"
-        self.ui.manuallySelectChartPushbutton.setEnabled(True)
-        self.ui.manuallySelectChartPushbutton.setStyleSheet(css)
-
-        # 5) Enter manual-selection mode; keep Flatten disabled until crop
-        self.manual_selection_mode = True
-        self.flatten_mode = False
-        self.ui.flattenChartImagePushButton.setEnabled(False)
-        self.ui.flattenChartImagePushButton.setStyleSheet("")
 
     def on_manual_crop_complete(self, rect: QRect):
-        # … your existing cropping logic to set self.cropped_fp …
+        """
+        Called when the QRect is drawn in manual crop mode
+        Enables the buttons for Show Original Image, Flatten Chart Mode and Detect Chart
+        """
+
         self.ui.detectChartShelfPushbutton.setEnabled(True)
         self.ui.showOriginalImagePushbutton.setEnabled(True)
 
-        # NOW enable the Flatten button
         css = "background-color: #A5D6A7"
         self.ui.flattenChartImagePushButton.setEnabled(True)
         self.ui.flattenChartImagePushButton.setStyleSheet(css)
 
     def flatten_chart_image(self):
-        # must have a cropped image first
+        """
+        Enter corner‐picking mode to flatten the manually selected chart region;
+        on completion, stores the cropped-preview pixmap and enables flattening.
+        """
         if not hasattr(self, 'cropped_preview_pixmap'):
             self.log('[Flatten] No cropped image, select region first')
             return
@@ -1307,165 +1355,365 @@ class MainWindow(QMainWindow):
         css = "background-color: #A5D6A7"
         self.ui.flattenChartImagePushButton.setStyleSheet(css)
 
-        # 1) reset any old state
         self.flatten_mode = True
         self.corner_points = []
 
-        # 2) clear out any previous dots/labels
-        self.previewScene.clear()
-        self.previewScene.addItem(QGraphicsPixmapItem(self.cropped_preview_pixmap))
-        self.ui.imagePreviewGraphicsView.resetTransform()
-        self.ui.imagePreviewGraphicsView.fitInView(
-            self.previewScene.itemsBoundingRect(),
-            Qt.KeepAspectRatio
-        )
+        self._display_preview(self.cropped_preview_pixmap)
+        # enable only Flatten & Finalize
+        self._set_chart_tools_enabled(flatten=True, finalize=True)
+
+    # def eventFilter(self, source, event):
+    #     ## TODO: Split event functions into their own functions, use this to handle these calls.
+    #     """
+    #     Master event handler for various modes.
+    #     :param source:
+    #     :param event:
+    #     """
+    #     PADDING = 600
+    #     if source == self.ui.imagePreviewGraphicsView.viewport():
+    #         # Manual selection (initial crop)
+    #         if self.manual_selection_mode and not self.flatten_mode:
+    #             if event.type() == QEvent.MouseButtonPress:
+    #                 self.origin = event.position().toPoint()
+    #                 self.rubberBand.setGeometry(QRect(self.origin, QSize()))
+    #                 self.rubberBand.show()
+    #                 return True
+    #             elif event.type() == QEvent.MouseMove and self.rubberBand.isVisible():
+    #                 self.rubberBand.setGeometry(
+    #                     QRect(self.origin, event.position().toPoint()).normalized()
+    #                 )
+    #                 return True
+    #             elif event.type() == QEvent.MouseButtonRelease and self.rubberBand.isVisible():
+    #                 rect = self.rubberBand.geometry()
+    #                 tl = self.ui.imagePreviewGraphicsView.mapToScene(rect.topLeft())
+    #                 br = self.ui.imagePreviewGraphicsView.mapToScene(rect.bottomRight())
+    #                 x, y = int(tl.x()), int(tl.y())
+    #                 w, h = abs(int(br.x() - tl.x())), abs(int(br.y() - tl.y()))
+    #                 self.manual_selection_mode = False
+    #                 self.rubberBand.hide()
+    #
+    #                 # Crop without padding
+    #                 self.cropped_preview_pixmap = self.current_image_pixmap.copy(x, y, w, h)
+    #                 self.log(
+    #                     f"[State] fp_image_array is {'set' if self.fp_image_array is not None else 'None'}; cropped_fp shape={getattr(self, 'cropped_fp', None).shape if hasattr(self, 'cropped_fp') else 'N/A'}")
+    #
+    #                 self.cropped_fp = self.fp_image_array[y:y + h, x:x + w, :]
+    #                 self.log(
+    #                     f"[State] fp_image_array is {'set' if self.fp_image_array is not None else 'None'}; cropped_fp shape={getattr(self, 'cropped_fp', None).shape if hasattr(self, 'cropped_fp') else 'N/A'}")
+    #
+    #                 self._display_preview(self.cropped_preview_pixmap)
+    #                 # Switch out of manual-selection
+    #                 self.manual_selection_mode = False
+    #                 # Enable Detect, Show, Flatten
+    #                 self._set_chart_tools_enabled(detect=True, show=True, flatten=True)
+    #                 return True
+    #
+    #         # Flatten mode (perspective selection)
+    #         if self.flatten_mode and event.type() == QEvent.MouseButtonPress:
+    #             pt = event.position().toPoint()
+    #             sp = self.ui.imagePreviewGraphicsView.mapToScene(pt)
+    #             idx = len(self.corner_points) + 1
+    #             self.corner_points.append((sp.x(), sp.y()))
+    #             self.log(f"[Flatten] Point {idx}: ({int(sp.x())}, {int(sp.y())})")
+    #
+    #             # Draw red dot and label
+    #             dot = FixedSizeEllipse(sp.x(), sp.y(), radius=8, color=QColor('red'))
+    #             self.previewScene.addItem(dot)
+    #             label = FixedSizeText(str(idx), sp.x() + 12, sp.y() - 8, color=QColor('red'))
+    #             self.previewScene.addItem(label)
+    #
+    #             if idx == 4:
+    #                 pts_src = np.array(self.corner_points, dtype=np.float32)
+    #                 width = np.linalg.norm(pts_src[1] - pts_src[0])
+    #                 height = int(width * 9.0 / 14.0)
+    #                 dst_pts = np.array([
+    #                     [PADDING, PADDING],
+    #                     [PADDING + width, PADDING],
+    #                     [PADDING + width, PADDING + height],
+    #                     [PADDING, PADDING + height]
+    #                 ], dtype=np.float32)
+    #
+    #                 # Extract full cropped image array with correct stride
+    #                 qimg = self.cropped_preview_pixmap.toImage().convertToFormat(QImage.Format_RGB888)
+    #                 h0 = qimg.height()
+    #                 stride = qimg.bytesPerLine()
+    #                 buf = bytes(qimg.constBits())[: h0 * stride]
+    #                 arr2d = np.frombuffer(buf, dtype=np.uint8).reshape((h0, stride))
+    #                 arr = arr2d[:, : qimg.width() * 3].reshape((h0, qimg.width(), 3))
+    #
+    #                 # Pad full array
+    #                 arr_padded = cv2.copyMakeBorder(
+    #                     arr, PADDING, PADDING, PADDING, PADDING,
+    #                     borderType=cv2.BORDER_CONSTANT, value=(0, 0, 0)
+    #                 )
+    #                 pts_src_padded = pts_src + PADDING
+    #
+    #                 M = cv2.getPerspectiveTransform(pts_src_padded, dst_pts)
+    #                 out_w = int(width + 2 * PADDING)
+    #                 out_h = int(height + 2 * PADDING)
+    #                 warped = cv2.warpPerspective(arr_padded, M, (out_w, out_h))
+    #
+    #                 # Show warped result
+    #                 q2 = QImage(warped.data, out_w, out_h, out_w * 3, QImage.Format_RGB888)
+    #                 pix2 = QPixmap.fromImage(q2)
+    #                 self.previewScene.clear()
+    #                 img_item = QGraphicsPixmapItem(pix2)
+    #                 self.previewScene.addItem(img_item)
+    #
+    #                 # Draw swatch grid overlay on top of the warped image
+    #                 swatch_grid_rect = QRect(PADDING, PADDING, int(width), int(height))
+    #                 self.flatten_swatch_rects = self.draw_colorchecker_swatch_grid(
+    #                     self.previewScene, swatch_grid_rect, n_cols=6, n_rows=4
+    #                 )
+    #
+    #                 self.ui.imagePreviewGraphicsView.resetTransform()
+    #                 self.ui.imagePreviewGraphicsView.fitInView(
+    #                     self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio
+    #                 )
+    #
+    #                 # Flatten FP and store back into cropped_fp
+    #                 fparr = cv2.copyMakeBorder(
+    #                     self.cropped_fp,
+    #                     PADDING, PADDING, PADDING, PADDING,
+    #                     borderType=cv2.BORDER_REFLECT
+    #                 )
+    #                 warped_fp = cv2.warpPerspective(
+    #                     fparr.astype(np.float32),
+    #                     M,
+    #                     (out_w, out_h)
+    #                 )
+    #                 self.cropped_fp = warped_fp
+    #                 self.log(
+    #                     f"[State] fp_image_array is {'set' if self.fp_image_array is not None else 'None'}; cropped_fp shape={getattr(self, 'cropped_fp', None).shape if hasattr(self, 'cropped_fp') else 'N/A'}")
+    #
+    #                 # self.log("[Flatten] Chart and FP image flattened")
+    #                 self.flatten_mode = False
+    #                 self.instruction_label.setText(
+    #                     "Please Run Detect Chart or Revert image to select new region"
+    #                 )
+    #                 self.ui.finalizeChartPushbutton.setEnabled(True)
+    #                 self.preview_manual_swatch_correction()
+    #             return True
+    #
 
     def eventFilter(self, source, event):
-        PADDING = 600
-        if source == self.ui.imagePreviewGraphicsView.viewport():
-            # Manual selection (initial crop)
-            if self.manual_selection_mode and not self.flatten_mode:
-                if event.type() == QEvent.MouseButtonPress:
-                    self.origin = event.position().toPoint()
-                    self.rubberBand.setGeometry(QRect(self.origin, QSize()))
-                    self.rubberBand.show()
-                    return True
-                elif event.type() == QEvent.MouseMove and self.rubberBand.isVisible():
-                    self.rubberBand.setGeometry(
-                        QRect(self.origin, event.position().toPoint()).normalized()
-                    )
-                    return True
-                elif event.type() == QEvent.MouseButtonRelease and self.rubberBand.isVisible():
-                    rect = self.rubberBand.geometry()
-                    tl = self.ui.imagePreviewGraphicsView.mapToScene(rect.topLeft())
-                    br = self.ui.imagePreviewGraphicsView.mapToScene(rect.bottomRight())
-                    x, y = int(tl.x()), int(tl.y())
-                    w, h = abs(int(br.x() - tl.x())), abs(int(br.y() - tl.y()))
-                    self.manual_selection_mode = False
-                    self.rubberBand.hide()
+        """
+        Master event handler for manual-selection, flatten modes,
+        idle zoom/pan, and thumbnail scroll/resize.
+        """
+        viewport = self.ui.imagePreviewGraphicsView.viewport()
+        thumbnail_frame = self.ui.thumbnailPreviewFrame
+        ev = event.type()
 
-                    # Crop without padding
-                    self.cropped_preview_pixmap = self.current_image_pixmap.copy(x, y, w, h)
-                    self.cropped_fp = self.fp_image_array[y:y + h, x:x + w, :]
-
-                    self.previewScene.clear()
-                    self.previewScene.addItem(QGraphicsPixmapItem(self.cropped_preview_pixmap))
-                    self.ui.imagePreviewGraphicsView.resetTransform()
-                    self.ui.imagePreviewGraphicsView.fitInView(
-                        self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio
-                    )
-                    self.ui.showOriginalImagePushbutton.setEnabled(True)
-                    self.ui.detectChartShelfPushbutton.setEnabled(True)
-                    self.ui.flattenChartImagePushButton.setEnabled(True)
-                    return True
-
-            # Flatten mode (perspective selection)
-            if self.flatten_mode and event.type() == QEvent.MouseButtonPress:
-                pt = event.position().toPoint()
-                sp = self.ui.imagePreviewGraphicsView.mapToScene(pt)
-                idx = len(self.corner_points) + 1
-                self.corner_points.append((sp.x(), sp.y()))
-                self.log(f"[Flatten] Point {idx}: ({int(sp.x())}, {int(sp.y())})")
-
-                # Draw red dot and label
-                dot = FixedSizeEllipse(sp.x(), sp.y(), radius=8, color=QColor('red'))
-                self.previewScene.addItem(dot)
-                label = FixedSizeText(str(idx), sp.x() + 12, sp.y() - 8, color=QColor('red'))
-                self.previewScene.addItem(label)
-
-                if idx == 4:
-                    pts_src = np.array(self.corner_points, dtype=np.float32)
-                    width = np.linalg.norm(pts_src[1] - pts_src[0])
-                    height = int(width * 9.0 / 14.0)
-                    dst_pts = np.array([
-                        [PADDING, PADDING],
-                        [PADDING + width, PADDING],
-                        [PADDING + width, PADDING + height],
-                        [PADDING, PADDING + height]
-                    ], dtype=np.float32)
-
-                    # Extract full cropped image array with correct stride
-                    qimg = self.cropped_preview_pixmap.toImage().convertToFormat(QImage.Format_RGB888)
-                    h0 = qimg.height()
-                    stride = qimg.bytesPerLine()
-                    buf = bytes(qimg.constBits())[: h0 * stride]
-                    arr2d = np.frombuffer(buf, dtype=np.uint8).reshape((h0, stride))
-                    arr = arr2d[:, : qimg.width() * 3].reshape((h0, qimg.width(), 3))
-
-                    # Pad full array
-                    arr_padded = cv2.copyMakeBorder(
-                        arr, PADDING, PADDING, PADDING, PADDING,
-                        borderType=cv2.BORDER_CONSTANT, value=(0, 0, 0)
-                    )
-                    pts_src_padded = pts_src + PADDING
-
-                    M = cv2.getPerspectiveTransform(pts_src_padded, dst_pts)
-                    out_w = int(width + 2 * PADDING)
-                    out_h = int(height + 2 * PADDING)
-                    warped = cv2.warpPerspective(arr_padded, M, (out_w, out_h))
-
-                    # Show warped result
-                    q2 = QImage(warped.data, out_w, out_h, out_w * 3, QImage.Format_RGB888)
-                    pix2 = QPixmap.fromImage(q2)
-                    self.previewScene.clear()
-                    img_item = QGraphicsPixmapItem(pix2)
-                    self.previewScene.addItem(img_item)
-
-                    # Draw swatch grid overlay on top of the warped image
-                    swatch_grid_rect = QRect(PADDING, PADDING, int(width), int(height))
-                    self.flatten_swatch_rects = self.draw_colorchecker_swatch_grid(
-                        self.previewScene, swatch_grid_rect, n_cols=6, n_rows=4
-                    )
-
-                    self.ui.imagePreviewGraphicsView.resetTransform()
-                    self.ui.imagePreviewGraphicsView.fitInView(
-                        self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio
-                    )
-
-                    # Flatten FP and store back into cropped_fp
-                    fparr = cv2.copyMakeBorder(
-                        self.cropped_fp,
-                        PADDING, PADDING, PADDING, PADDING,
-                        borderType=cv2.BORDER_REFLECT
-                    )
-                    warped_fp = cv2.warpPerspective(
-                        fparr.astype(np.float32),
-                        M,
-                        (out_w, out_h)
-                    )
-                    self.cropped_fp = warped_fp
-
-                    # self.log("[Flatten] Chart and FP image flattened")
-                    self.flatten_mode = False
-                    self.instruction_label.setText(
-                        "Please Run Detect Chart or Revert image to select new region"
-                    )
-                    self.ui.finalizeChartPushbutton.setEnabled(True)
-                    self.preview_manual_swatch_correction()
+        # 1) Thumbnail scroll & resize
+        if source == thumbnail_frame:
+            if ev == QEvent.Wheel:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    self.select_previous_image()
+                elif delta < 0:
+                    self.select_next_image()
                 return True
+            if ev == QEvent.Resize:
+                self.update_thumbnail_strip()
+                return True
+            return super().eventFilter(source, event)
 
-        # Event to update thumbnail strip
-        if source == self.ui.thumbnailPreviewFrame and event.type() == QEvent.Resize:
-            self.update_thumbnail_strip()
-            return True
+        # 2) Preview viewport events
+        if source == viewport:
+            # a) Idle zoom
+            if ev == QEvent.Wheel and not (self.manual_selection_mode or self.flatten_mode):
+                return self._handle_preview_zoom(event)
+            # b) Idle pan
+            if ev == QEvent.MouseButtonPress and event.button() == Qt.LeftButton \
+                    and not (self.manual_selection_mode or self.flatten_mode):
+                return self._handle_preview_pan_press(event)
+            if ev == QEvent.MouseMove and hasattr(self, '_pan_start_pos'):
+                return self._handle_preview_pan_move(event)
+            if ev == QEvent.MouseButtonRelease and hasattr(self, '_pan_start_pos'):
+                return self._handle_preview_pan_release(event)
+            # c) Idle resize (respect auto-fit)
+            if ev == QEvent.Resize and not (self.manual_selection_mode or self.flatten_mode):
+                if getattr(self, '_auto_fit_enabled', True):
+                    self.ui.imagePreviewGraphicsView.fitInView(
+                        self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio)
+                return True
+            # d) Block stray pointer events when idle
+            if not (self.manual_selection_mode or self.flatten_mode) and ev in (
+                    QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease):
+                return False
+            # e) Manual-selection logic
+            if self.manual_selection_mode and not self.flatten_mode:
+                if ev == QEvent.MouseButtonPress:
+                    pos = event.position().toPoint()
+                    scene_pt = self.ui.imagePreviewGraphicsView.mapToScene(pos)
+                    if not self.previewScene.itemsBoundingRect().contains(scene_pt):
+                        return False
+                    return self._handle_manual_press(event)
+                elif ev == QEvent.MouseMove:
+                    return self._handle_manual_move(event)
+                elif ev == QEvent.MouseButtonRelease:
+                    return self._handle_manual_release(event)
+            # f) Flatten mode logic
+            if self.flatten_mode and ev == QEvent.MouseButtonPress:
+                return self._handle_flatten_press(event)
 
-        # Event to update the image preview size
-        if source == self.ui.imagePreviewGraphicsView.viewport() and event.type() == QEvent.Resize:
-            # Re-fit the view to the scene contents (the image)
-            self.ui.imagePreviewGraphicsView.fitInView(
-                self.previewScene.itemsBoundingRect(), Qt.KeepAspectRatio)
-            return True
-
-        # Event to scroll the thumbnail preview area with mousewheel
-        if source == self.ui.thumbnailPreviewFrame and event.type() == QEvent.Wheel:
-            delta = event.angleDelta().y()
-            if delta > 0:
-                self.select_previous_image()
-            elif delta < 0:
-                self.select_next_image()
-            return True
-
+        # 3) Default fallback
         return super().eventFilter(source, event)
+
+    def _handle_manual_press(self, event):
+        self.origin = event.position().toPoint()
+        if not hasattr(self, 'rubberBand'):
+            self.rubberBand = QRubberBand(QRubberBand.Rectangle, self.ui.imagePreviewGraphicsView)
+        self.rubberBand.setGeometry(QRect(self.origin, QSize()))
+        self.rubberBand.show()
+        return True
+
+    def _handle_manual_move(self, event):
+        if self.rubberBand.isVisible():
+            rect = QRect(self.origin, event.position().toPoint()).normalized()
+            self.rubberBand.setGeometry(rect)
+            return True
+        return False
+
+    def _handle_manual_release(self, event):
+        if not self.rubberBand.isVisible():
+            return False
+        # Map rubber-band rect to scene coords
+        rect = self.rubberBand.geometry()
+        tl = self.ui.imagePreviewGraphicsView.mapToScene(rect.topLeft())
+        br = self.ui.imagePreviewGraphicsView.mapToScene(rect.bottomRight())
+        x, y = int(tl.x()), int(tl.y())
+        w, h = abs(int(br.x() - tl.x())), abs(int(br.y() - tl.y()))
+
+        self.rubberBand.hide()
+        self.manual_selection_mode = False
+
+        # Crop data
+        self.cropped_preview_pixmap = self.current_image_pixmap.copy(x, y, w, h)
+        self.cropped_fp = self.fp_image_array[y:y+h, x:x+w, :]
+
+        self._display_preview(self.cropped_preview_pixmap)
+        self._set_chart_tools_enabled(detect=True, show=True, flatten=True)
+        return True
+
+    def _handle_flatten_press(self, event):
+        pt = event.position().toPoint()
+        sp = self.ui.imagePreviewGraphicsView.mapToScene(pt)
+        idx = len(self.corner_points) + 1
+        self.corner_points.append((sp.x(), sp.y()))
+        self.log(f"[Flatten] Point {idx}: ({int(sp.x())}, {int(sp.y())})")
+
+        # Draw UI markers
+        dot = FixedSizeEllipse(sp.x(), sp.y(), radius=8, color=QColor('red'))
+        label = FixedSizeText(str(idx), sp.x()+12, sp.y()-8, color=QColor('red'))
+        self.previewScene.addItem(dot)
+        self.previewScene.addItem(label)
+
+        # Once four points selected, perform flatten
+        if idx == 4:
+            self._perform_flatten_transform()
+        return True
+
+    def _perform_flatten_transform(self):
+        """
+        Executes perspective warp and grid overlay after four corner points are set.
+        """
+        PADDING = 600
+        pts_src = np.array(self.corner_points, dtype=np.float32)
+        width = np.linalg.norm(pts_src[1] - pts_src[0])
+        height = int(width * 9.0 / 14.0)
+        dst_pts = np.array([
+            [PADDING, PADDING], [PADDING+width, PADDING],
+            [PADDING+width, PADDING+height], [PADDING, PADDING+height]
+        ], dtype=np.float32)
+
+        # Extract byte buffer from cropped_preview_pixmap
+        qimg = self.cropped_preview_pixmap.toImage().convertToFormat(QImage.Format_RGB888)
+        h0 = qimg.height(); stride = qimg.bytesPerLine()
+        buf = bytes(qimg.constBits())[:h0*stride]
+        arr = np.frombuffer(buf, dtype=np.uint8).reshape((h0, stride))
+        arr = arr[:, :qimg.width()*3].reshape((h0, qimg.width(), 3))
+
+        # Pad and compute warp
+        arr_p = cv2.copyMakeBorder(arr, PADDING, PADDING, PADDING, PADDING,
+                                  borderType=cv2.BORDER_CONSTANT, value=(0,0,0))
+        pts_src_p = pts_src + PADDING
+        M = cv2.getPerspectiveTransform(pts_src_p, dst_pts)
+        warped = cv2.warpPerspective(arr_p, M, (int(width+2*PADDING), int(height+2*PADDING)))
+
+        # Display warped image
+        q2 = QImage(warped.data, warped.shape[1], warped.shape[0], warped.shape[1]*3,
+                    QImage.Format_RGB888)
+        self._display_preview(QPixmap.fromImage(q2))
+
+        # Draw swatch grid and update fp array
+        swatch_rect = QRect(PADDING, PADDING, int(width), int(height))
+        self.flatten_swatch_rects = self.draw_colorchecker_swatch_grid(
+            self.previewScene, swatch_rect, n_cols=6, n_rows=4)
+
+        # Transform float-precision data
+        fparr = cv2.copyMakeBorder(self.cropped_fp, PADDING, PADDING, PADDING, PADDING,
+                                   borderType=cv2.BORDER_REFLECT)
+        self.cropped_fp = cv2.warpPerspective(fparr.astype(np.float32), M,
+                                              (warped.shape[1], warped.shape[0]))
+        self.flatten_mode = False
+        self.instruction_label.setText(
+            "Please Run Detect Chart or Revert image to select new region")
+        self.ui.finalizeChartPushbutton.setEnabled(True)
+        self.preview_manual_swatch_correction()
+
+    def _handle_preview_zoom(self, event):
+        """
+        Zoom in/out on the preview viewport with mouse wheel when idle.
+        Uses smooth zoom based on angleDelta and transforms around cursor.
+        Disables auto-fit once user zooms.
+        """
+        # Ensure auto-fit flag exists
+        if not hasattr(self, '_auto_fit_enabled'):
+            self._auto_fit_enabled = True
+        # Normalize wheel delta (120 units = one notch)
+        delta = event.angleDelta().y() / 120.0
+        factor = 1.15 ** delta
+        view = self.ui.imagePreviewGraphicsView
+        view.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        view.scale(factor, factor)
+        # After manual zoom, prevent automatic fit-on-resize
+        self._auto_fit_enabled = False
+        return True
+
+    def _handle_preview_pan_press(self, event):
+        """
+        Start panning on left mouse button press when idle.
+        """
+        if event.button() == Qt.LeftButton:
+            self._pan_start_pos = event.position().toPoint()
+            view = self.ui.imagePreviewGraphicsView
+            self._pan_h_scroll = view.horizontalScrollBar().value()
+            self._pan_v_scroll = view.verticalScrollBar().value()
+            return True
+        return False
+
+    def _handle_preview_pan_move(self, event):
+        """
+        Pan the view as the mouse moves when dragging.
+        """
+        if hasattr(self, '_pan_start_pos'):
+            delta = event.position().toPoint() - self._pan_start_pos
+            view = self.ui.imagePreviewGraphicsView
+            view.horizontalScrollBar().setValue(self._pan_h_scroll - delta.x())
+            view.verticalScrollBar().setValue(self._pan_v_scroll - delta.y())
+            return True
+        return False
+
+    def _handle_preview_pan_release(self, event):
+        """
+        End panning on mouse release.
+        """
+        if hasattr(self, '_pan_start_pos'):
+            del self._pan_start_pos, self._pan_h_scroll, self._pan_v_scroll
+            return True
+        return False
 
     def preview_manual_swatch_correction(self):
         """
@@ -1496,7 +1744,6 @@ class MainWindow(QMainWindow):
         tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.npy')
         np.save(tmp_file.name, swatch_colours)
         self.calibration_file = tmp_file.name
-        # self.log(f"[Manual Swatch] Extracted {len(swatch_colours)} mean swatch colours.")
 
         worker = SwatchPreviewWorker(
             self.cropped_fp,
@@ -1659,14 +1906,9 @@ class MainWindow(QMainWindow):
         - Enables only the manual‐select button for a new crop.
         """
         # 1) Show original preview
-        if hasattr(self, 'original_preview_pixmap') and self.original_preview_pixmap:
-            self.previewScene.clear()
-            self.previewScene.addItem(QGraphicsPixmapItem(self.original_preview_pixmap))
-            self.ui.imagePreviewGraphicsView.resetTransform()
-            self.ui.imagePreviewGraphicsView.fitInView(
-                self.previewScene.itemsBoundingRect(),
-                Qt.KeepAspectRatio
-            )
+        if hasattr(self, 'original_preview_pixmap'):
+            self.current_image_pixmap = self.original_preview_pixmap
+            self._display_preview(self.original_preview_pixmap)
             self.showing_chart_preview = False
 
         # 2) Hide any debug/chart overlay
@@ -1679,20 +1921,10 @@ class MainWindow(QMainWindow):
             self.rubberBand.hide()
         # Prepare for a fresh manual selection
         self.manual_selection_mode = True
+        self.flatten_mode = False
+        self.corner_points.clear()
 
-        # 4) Reset & disable ALL tool buttons until we have new crop:
-        for btn in (
-            self.ui.detectChartShelfPushbutton,
-            self.ui.showOriginalImagePushbutton,
-            self.ui.flattenChartImagePushButton,
-            self.ui.finalizeChartPushbutton
-        ):
-            btn.setEnabled(False)
-            btn.setStyleSheet('')
-
-        # 5) Re‐enable manual‐select so user can draw a new box:
-        self.ui.manuallySelectChartPushbutton.setEnabled(True)
-        self.ui.manuallySelectChartPushbutton.setStyleSheet('')
+        self._set_chart_tools_enabled(manual=True)
 
         # 6) Clear any temp data from prior selection:
         if hasattr(self, 'temp_swatches'):
@@ -1702,9 +1934,18 @@ class MainWindow(QMainWindow):
 
 
     def show_debug_frame(self, visible):
+        """
+        Shows the debug window for colour chart debugging
+        :param visible:
+        :return:
+        """
         self.ui.colourChartDebugToolsFrame.setVisible(visible)
 
     def setup_debug_views(self):
+        """
+        Setup the UI for debugging
+        :return:
+        """
         self.ui.correctedImageRadioButton.toggled.connect(lambda checked: checked and self.corrected_image_view())
         self.ui.swatchOverlayRadioButton.toggled.connect(lambda checked: checked and self.swatch_overlay_view())
         self.ui.swatchAndClusterRadioButton.toggled.connect(
@@ -1712,6 +1953,9 @@ class MainWindow(QMainWindow):
         self.ui.detectionDebugRadioButton.toggled.connect(lambda checked: checked and self.detection_debug_view())
 
     def swatches_and_clusters_view(self):
+        """
+        Display the debug image showing swatch bounding‐boxes and cluster outlines in the preview area.
+        """
         item = self.ui.imagesListWidget.currentItem()
         if item is None:
             self.log("[Debug View] No item selected.")
@@ -1729,6 +1973,9 @@ class MainWindow(QMainWindow):
             self.log("[Debug View] Swatches and Clusters unavailable.")
 
     def corrected_image_view(self):
+        """
+        Display the colour‐corrected debug image for the selected item in the preview area.
+        """
         item = self.ui.imagesListWidget.currentItem()
         if item is None:
             self.log("[Debug View] No item selected.")
@@ -1746,6 +1993,9 @@ class MainWindow(QMainWindow):
             self.log("[Debug View] Corrected image unavailable.")
 
     def swatch_overlay_view(self):
+        """
+        Display the swatch‐overlay debug image (chart with semi‐transparent swatches) in the preview area.
+        """
         item = self.ui.imagesListWidget.currentItem()
         if item is None:
             self.log("[Debug View] No item selected.")
@@ -1763,6 +2013,9 @@ class MainWindow(QMainWindow):
             self.log("[Debug View] Swatch overlay unavailable.")
 
     def detection_debug_view(self):
+        """
+        Display the segmentation (detected patch shapes) debug image for the selected item.
+        """
         item = self.ui.imagesListWidget.currentItem()
         if item is None:
             self.log("[Debug View] No item selected.")
@@ -1780,6 +2033,10 @@ class MainWindow(QMainWindow):
             self.log("[Debug View] Detection debug unavailable.")
 
     def pixmap_from_array(self, array):
+        """
+        Convert a H×W×3 uint8 NumPy array into a QPixmap for display.
+        Assumes RGB888 layout.
+        """
         h, w, c = array.shape
         bytes_per_line = c * w
         img = QImage(array.data, w, h, bytes_per_line, QImage.Format_RGB888)
@@ -1795,52 +2052,63 @@ class MainWindow(QMainWindow):
         brightness_list = []
         item_to_brightness = {}
         chart_brightness = None
+        self.average_enabled = True
 
-        for i in range(self.ui.imagesListWidget.count()):
-            item = self.ui.imagesListWidget.item(i)
-            meta = item.data(Qt.UserRole)
-            img_path = meta.get('input_path')
-            arr = self.load_thumbnail_array(img_path)
-            if arr is None:
-                self.log(f"[Exposure Calc] Failed on {img_path}: could not load thumbnail")
-                continue
-            shadow_threshold = self.ui.shadowLimitSpinBox.value() / 100.0
-            highlight_threshold = self.ui.highlightLimitSpinBox.value() / 100.0
+        if self.selected_average_source is None:
+            self.log("[Exposure Calc] No selected average source.")
 
-            lum = 0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2]
+        else:
 
-            mask = (lum > shadow_threshold) & (lum < highlight_threshold)
+            for i in range(self.ui.imagesListWidget.count()):
+                max_size = (512, 512)
+                item = self.ui.imagesListWidget.item(i)
+                meta = item.data(Qt.UserRole)
+                img_path = meta.get('input_path')
+                arr = None
+                cache = self.thumbnail_cache.get(img_path)
+                if cache and 'array' in cache and cache['array'] is not None:
+                    arr = cache['array']
 
-            valid = lum[mask]
-            mean_brightness = valid.mean() if valid.size > 0 else lum.mean()
-            brightness_list.append(mean_brightness)
-            item_to_brightness[img_path] = mean_brightness
-            if meta.get('chart'):
-                chart_brightness = mean_brightness  # Only one chart expected, take the first found
+                if arr is None:
+                    self.log(f"[Exposure Calc] Failed on {img_path}: could not load thumbnail")
+                    continue
+                shadow_threshold = self.ui.shadowLimitSpinBox.value() / 100.0
+                highlight_threshold = self.ui.highlightLimitSpinBox.value() / 100.0
 
-        if not brightness_list:
-            self.log("[Exposure Calc] No valid images for exposure normalization.")
-            return
+                lum = 0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2]
 
-        # Reference: chart if present, otherwise mean of all
-        reference_brightness = chart_brightness if chart_brightness is not None else np.mean(brightness_list)
-        if chart_brightness is None:
-            self.log(f"[Exposure Calc] Using average image brightness as reference ({reference_brightness:.3f})")
+                mask = (lum > shadow_threshold) & (lum < highlight_threshold)
 
-        # Set exposure multiplier for each image
-        for i in range(self.ui.imagesListWidget.count()):
-            item = self.ui.imagesListWidget.item(i)
-            meta = item.data(Qt.UserRole)
-            img_path = meta.get('input_path')
-            img_brightness = item_to_brightness.get(img_path)
-            if img_brightness is None:
-                continue
-            multiplier = reference_brightness / img_brightness if img_brightness > 0 else 1.0
-            meta['average_exposure'] = multiplier
-            item.setData(Qt.UserRole, meta)
-            self.log(f"[Exposure Calc] {meta.get('input_path')} multiplier: {multiplier:.3f}")
+                valid = lum[mask]
+                mean_brightness = valid.mean() if valid.size > 0 else lum.mean()
+                brightness_list.append(mean_brightness)
+                item_to_brightness[img_path] = mean_brightness
+                if meta.get('average_source'):
+                    chart_brightness = mean_brightness  # Only one chart expected, take the first found
 
-        self.log("[Exposure Calc] Average exposure multipliers calculated and stored.")
+            if not brightness_list:
+                self.log("[Exposure Calc] No valid images for exposure normalization.")
+                return
+
+            # Reference: chart if present, otherwise mean of all
+            reference_brightness = chart_brightness if chart_brightness is not None else np.mean(brightness_list)
+            if chart_brightness is None:
+                self.log(f"[Exposure Calc] Using average image brightness as reference ({reference_brightness:.3f})")
+
+            # Set exposure multiplier for each image
+            for i in range(self.ui.imagesListWidget.count()):
+                item = self.ui.imagesListWidget.item(i)
+                meta = item.data(Qt.UserRole)
+                img_path = meta.get('input_path')
+                img_brightness = item_to_brightness.get(img_path)
+                if img_brightness is None:
+                    continue
+                multiplier = reference_brightness / img_brightness if img_brightness > 0 else 1.0
+                meta['average_exposure'] = multiplier
+                item.setData(Qt.UserRole, meta)
+                self.log(f"[Exposure Calc] {meta.get('input_path')} multiplier: {multiplier:.3f}")
+
+            self.log("[Exposure Calc] Average exposure multipliers calculated and stored.")
 
     def load_thumbnail_array(self, path, max_size=(512, 512)):
         """
@@ -1912,6 +2180,9 @@ class MainWindow(QMainWindow):
             if 'average_exposure' in meta:
                 del meta['average_exposure']
                 item.setData(Qt.UserRole, meta)
+
+        self.average_enabled = False
+        self.update_thumbnail_strip()
         self.log("[Exposure Calc] All exposure multipliers removed.")
 
     def show_exposure_debug_overlay(self):
@@ -1981,10 +2252,36 @@ class MainWindow(QMainWindow):
     def select_image_from_thumbnail(self, idx):
         self.ui.imagesListWidget.setCurrentRow(idx)
 
-    def update_thumbnail_strip(self):
-        holder = self.ui.thumbnailPreviewDisplayFrame_holder
+    def set_selected_image_as_average_source(self):
+        self.selected_average_source = self.ui.imagesListWidget.currentItem()
+        data = self.selected_average_source.data(Qt.UserRole)
+        img_path = data.get("input_path")
+        data["average_source"] = True
+        self.selected_average_source.setData(Qt.UserRole, data)
+        self.log(f"set {img_path} as average source")
 
-        # Remove ALL previous child widgets (thumbnails)
+    def _adjust_pixmap_brightness(self, pixmap: QPixmap, factor: float) -> QPixmap:
+        """
+        Return a new QPixmap with brightness adjusted by `factor`.
+        Factor >1 brightens, <1 darkens.
+        """
+        img = pixmap.toImage().convertToFormat(QImage.Format_RGBA8888)
+        w, h = img.width(), img.height()
+
+        ptr = img.bits()
+        arr = np.ndarray((h, w, 4), dtype=np.uint8, buffer=ptr)
+
+        rgb = arr[..., :3].astype(np.float32) * factor
+        arr[..., :3] = np.clip(rgb, 0, 255).astype(np.uint8)
+
+        return QPixmap.fromImage(img)
+
+    def update_thumbnail_strip(self):
+        """
+        Refresh and layout all thumbnail widgets; apply any average-exposure brightness tweak.
+        """
+        holder = self.ui.thumbnailPreviewDisplayFrame_holder
+        # Clear previous
         for child in holder.findChildren(QWidget):
             child.setParent(None)
             child.deleteLater()
@@ -1996,74 +2293,66 @@ class MainWindow(QMainWindow):
         sel_idx = self.ui.imagesListWidget.currentRow()
         frame_width = holder.width()
 
-        # Estimate thumbnail widths
+        # Compute widths
         default_aspect = 1.5
         default_width = int(default_aspect * 60)
         widths = []
         for i in range(count):
             meta = self.ui.imagesListWidget.item(i).data(Qt.UserRole)
-            cache = self.thumbnail_cache.get(meta['input_path'])
-            pixmap = cache['pixmap'] if cache and 'pixmap' in cache else None
-            if pixmap is not None and not pixmap.isNull():
+            cache = self.thumbnail_cache.get(meta['input_path'], {})
+            pixmap = cache.get('pixmap')
+            if pixmap and not pixmap.isNull():
                 aspect = pixmap.width() / pixmap.height()
                 widths.append(int(aspect * 60))
             else:
                 widths.append(default_width)
 
-        # Calculate how many thumbnails fit: sum widths outwards from sel_idx until you run out of space
         thumb_indices = [sel_idx]
-        total_width = widths[sel_idx] if count > 0 else 0
-        left, right = sel_idx - 1, sel_idx + 1
-        while (left >= 0 or right < count):
-            add_left = (left >= 0)
-            add_right = (right < count)
-            if add_left and (not add_right or (len(thumb_indices) % 2 == 1)):
-                candidate_width = total_width + widths[left]
-                if candidate_width > frame_width and len(thumb_indices) >= 3:
-                    break
-                thumb_indices.insert(0, left)
-                total_width += widths[left]
-                left -= 1
-            elif add_right:
-                candidate_width = total_width + widths[right]
-                if candidate_width > frame_width and len(thumb_indices) >= 3:
-                    break
-                thumb_indices.append(right)
-                total_width += widths[right]
-                right += 1
+        total_width = widths[sel_idx]
+        left, right = sel_idx-1, sel_idx+1
+        while left>=0 or right<count:
+            if left>=0 and (right>=count or len(thumb_indices)%2==1):
+                if total_width+widths[left] > frame_width and len(thumb_indices)>=3: break
+                thumb_indices.insert(0,left); total_width+=widths[left]; left-=1
+            elif right<count:
+                if total_width+widths[right] > frame_width and len(thumb_indices)>=3: break
+                thumb_indices.append(right); total_width+=widths[right]; right+=1
             else:
                 break
 
         display_items = [self.ui.imagesListWidget.item(i) for i in thumb_indices]
         display_widths = [widths[i] for i in thumb_indices]
-        if total_width > 0 and total_width < frame_width:
-            # Proportionally scale up to fit frame width
-            scale = frame_width / total_width
-            display_widths = [int(w * scale) for w in display_widths]
+        if 0<total_width<frame_width:
+            scale = frame_width/total_width
+            display_widths = [int(w*scale) for w in display_widths]
 
-        # Add the thumbnails to the holder layout
+        # Build thumbnails
         x_offset = 0
-        for i, item in enumerate(display_items):
+        for idx, item in zip(thumb_indices, display_items):
             meta = item.data(Qt.UserRole)
-            cache = self.thumbnail_cache.get(meta['input_path'])
-            pixmap = cache['pixmap'] if cache and 'pixmap' in cache else None
-            real_index = thumb_indices[i]
-            label = ClickableLabel(real_index, holder)
-            if pixmap is not None and not pixmap.isNull():
-                thumb = pixmap.scaled(display_widths[i], 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            cache = self.thumbnail_cache.get(meta['input_path'], {})
+            pixmap = cache.get('pixmap')
+            label = ClickableLabel(idx, holder)
+            if pixmap and not pixmap.isNull():
+                thumb = pixmap.scaled(display_widths[thumb_indices.index(idx)], 60,
+                                      Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                # Apply brightness adjust if enabled
+                factor = meta.get('average_exposure', 1.0)
+                if factor != 1.0:
+                    thumb = self._adjust_pixmap_brightness(thumb, factor)
                 label.setPixmap(thumb)
-                label.setFixedSize(display_widths[i], 60)
+                label.setFixedSize(thumb.width(), thumb.height())
             else:
                 label.setText("No preview")
-                label.setFixedSize(display_widths[i], 60)
-            if real_index == sel_idx:
-                label.setStyleSheet("border: 2px solid #2196F3;")
-            else:
-                label.setStyleSheet("border: 1px solid #999;")
+                label.setFixedSize(display_widths[thumb_indices.index(idx)], 60)
+
+            label.setStyleSheet(
+                "border: 2px solid #2196F3;" if idx==sel_idx else "border: 1px solid #999;"
+            )
             label.clicked.connect(self.select_image_from_thumbnail)
             label.move(x_offset, 0)
             label.show()
-            x_offset += display_widths[i]
+            x_offset += label.width()
 
     def draw_colorchecker_swatch_grid(self, scene, image_rect, n_cols=6, n_rows=4, color=QColor(0, 255, 0, 90)):
         """Draws a 6x4 swatch grid (for ColorChecker) over the image_rect on the provided QGraphicsScene."""
