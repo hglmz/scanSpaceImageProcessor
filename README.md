@@ -2,6 +2,10 @@
 
 A Qt/PySide6 desktop application for automated Xrite/Calibrite colour checker calibration and batch colour correction of RAW camera images from photogrammetry datasets.
 
+This is the first release, and there may be bugs or other unplanned issues. please report any isseus you come accross!
+
+Check out the guide
+https://scanspace.nz/blogs/news/batch-process-photogrammetry-images-for-free
 ---
 
 ## Features
