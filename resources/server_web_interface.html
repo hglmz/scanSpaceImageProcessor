@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan Space Image Processor - Server Monitor</title>
+    <link rel="icon" type="image/x-icon" href="/resources/scanSpaceLogo_256px.ico">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2d2d2d, #3a3a3a);
+            padding: 1rem 2rem;
+            border-bottom: 3px solid #4a4a4a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            color: #ffffff;
+            font-size: 1.8rem;
+            font-weight: 300;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo {
+            width: 48px;
+            height: 48px;
+            background: url('/resources/scanSpaceLogo_256px.ico') no-repeat center;
+            background-size: contain;
+        }
+
+        .status-badge {
+            background: #2d5a2d;
+            color: #90ff90;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            border: 1px solid #4a7a4a;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 2rem;
+        }
+
+        .section {
+            background: #2a2a2a;
+            border-radius: 8px;
+            border: 1px solid #404040;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        .section-header {
+            background: linear-gradient(135deg, #3a3a3a, #454545);
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #505050;
+            transition: background 0.2s;
+        }
+
+        .section-header:hover {
+            background: linear-gradient(135deg, #404040, #4a4a4a);
+        }
+
+        .section-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .section-count {
+            background: #4a4a4a;
+            color: #e0e0e0;
+            padding: 0.3rem 0.8rem;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+
+        .collapse-icon {
+            font-size: 1.2rem;
+            transition: transform 0.3s;
+            color: #b0b0b0;
+        }
+
+        .collapsed .collapse-icon {
+            transform: rotate(-90deg);
+        }
+
+        .section-content {
+            padding: 1.5rem;
+            transition: max-height 0.3s ease-out;
+            overflow: hidden;
+        }
+
+        .collapsed .section-content {
+            display: none;
+        }
+
+        .job-item, .client-item {
+            background: #333333;
+            border: 1px solid #4a4a4a;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .job-item:hover, .client-item:hover {
+            border-color: #666666;
+        }
+
+        .job-item:last-child, .client-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.8rem;
+        }
+
+        .item-title {
+            font-weight: 600;
+            color: #ffffff;
+            font-size: 1.1rem;
+        }
+
+        .progress-bar {
+            background: #1a1a1a;
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+
+        .progress-fill {
+            background: linear-gradient(90deg, #4a9a4a, #6ab26a);
+            height: 100%;
+            transition: width 0.3s;
+            border-radius: 10px;
+        }
+
+        .item-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.8rem;
+            font-size: 0.9rem;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .detail-label {
+            color: #b0b0b0;
+            font-weight: 500;
+        }
+
+        .detail-value {
+            color: #e0e0e0;
+            font-weight: 600;
+        }
+
+        .restart-btn {
+            background: linear-gradient(135deg, #5a4a2d, #7a6a3d);
+            color: #ffffff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            border: 1px solid #8a7a4d;
+        }
+
+        .restart-btn:hover {
+            background: linear-gradient(135deg, #6a5a3d, #8a7a4d);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        .restart-btn:active {
+            transform: translateY(1px);
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        .status-connected {
+            background: #4a9a4a;
+            box-shadow: 0 0 6px #4a9a4a;
+        }
+
+        .status-processing {
+            background: #9a9a4a;
+            box-shadow: 0 0 6px #9a9a4a;
+        }
+
+        .status-idle {
+            background: #4a6a9a;
+            box-shadow: 0 0 6px #4a6a9a;
+        }
+
+        .status-disconnected {
+            background: #9a4a4a;
+            box-shadow: 0 0 6px #9a4a4a;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #b0b0b0;
+            font-style: italic;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 2rem;
+            color: #808080;
+            font-style: italic;
+            background: #252525;
+            border-radius: 4px;
+            border: 1px dashed #505050;
+        }
+
+        @media (max-width: 1200px) {
+            .container {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+            }
+            
+            .header {
+                padding: 1rem;
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            .item-details {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .last-updated {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            background: #2a2a2a;
+            border: 1px solid #404040;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #b0b0b0;
+        }
+
+        .recent-job-item {
+            background: #333333;
+            border: 1px solid #4a4a4a;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .recent-job-item:hover {
+            border-color: #666666;
+        }
+
+        .recent-job-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .recent-job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.8rem;
+        }
+
+        .recent-job-title {
+            font-weight: 600;
+            color: #ffffff;
+            font-size: 1rem;
+        }
+
+        .recent-job-time {
+            background: #4a9a4a;
+            color: #ffffff;
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .recent-job-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.8rem;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Scan Space Image Processor - Server Monitor</h1>
+        <div class="logo-container">
+            <div class="status-badge" id="serverStatus">
+                <span class="status-indicator status-connected"></span>
+                Server Online
+            </div>
+            <div class="logo"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Current Running Jobs -->
+        <div class="section" id="currentJobsSection">
+            <div class="section-header" onclick="toggleSection('currentJobs')">
+                <div>
+                    <span class="section-title">Current Running Jobs</span>
+                    <span class="section-count" id="currentJobsCount">0</span>
+                </div>
+                <span class="collapse-icon">▼</span>
+            </div>
+            <div class="section-content" id="currentJobsContent">
+                <div class="loading">Loading current jobs...</div>
+            </div>
+        </div>
+
+        <!-- Queued Jobs -->
+        <div class="section" id="queuedJobsSection">
+            <div class="section-header" onclick="toggleSection('queuedJobs')">
+                <div>
+                    <span class="section-title">Queued Jobs</span>
+                    <span class="section-count" id="queuedJobsCount">0</span>
+                </div>
+                <span class="collapse-icon">▼</span>
+            </div>
+            <div class="section-content" id="queuedJobsContent">
+                <div class="loading">Loading queued jobs...</div>
+            </div>
+        </div>
+
+        <!-- Connected Worker Clients -->
+        <div class="section" id="clientsSection">
+            <div class="section-header" onclick="toggleSection('clients')">
+                <div>
+                    <span class="section-title">Connected Worker Clients</span>
+                    <span class="section-count" id="clientsCount">0</span>
+                </div>
+                <span class="collapse-icon">▼</span>
+            </div>
+            <div class="section-content" id="clientsContent">
+                <div class="loading">Loading clients...</div>
+            </div>
+        </div>
+
+        <!-- Recently Completed Jobs -->
+        <div class="section" id="recentJobsSection">
+            <div class="section-header" onclick="toggleSection('recentJobs')">
+                <div>
+                    <span class="section-title">Recently Completed Job Groups</span>
+                    <span class="section-count" id="recentJobsCount">0</span>
+                </div>
+                <span class="collapse-icon">▼</span>
+            </div>
+            <div class="section-content" id="recentJobsContent">
+                <div class="loading">Loading recent jobs...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="last-updated" id="lastUpdated">
+        Last updated: Never
+    </div>
+
+    <script>
+        // Global state
+        let updateInterval;
+        let collapsedSections = new Set();
+        let expandedJobDetails = new Set();
+        let expandedClientJobs = new Set();
+
+        // Initialize the interface
+        document.addEventListener('DOMContentLoaded', function() {
+            startUpdating();
+        });
+
+        function toggleSection(sectionId) {
+            const section = document.getElementById(sectionId + 'Section');
+            const isCollapsed = collapsedSections.has(sectionId);
+            
+            if (isCollapsed) {
+                section.classList.remove('collapsed');
+                collapsedSections.delete(sectionId);
+            } else {
+                section.classList.add('collapsed');
+                collapsedSections.add(sectionId);
+            }
+        }
+
+        function startUpdating() {
+            updateData();
+            updateInterval = setInterval(updateData, 1000); // Update every 1 second
+        }
+
+        function stopUpdating() {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
+        }
+
+        async function updateData() {
+            try {
+                // Update server status
+                await updateServerStatus();
+                
+                // Update all sections
+                await Promise.all([
+                    updateCurrentJobs(),
+                    updateQueuedJobs(),
+                    updateClients(),
+                    updateRecentJobs()
+                ]);
+
+                // Update last updated timestamp
+                document.getElementById('lastUpdated').textContent = 
+                    `Last updated: ${new Date().toLocaleTimeString()}`;
+
+            } catch (error) {
+                console.error('Failed to update data:', error);
+                updateServerStatus(false);
+            }
+        }
+
+        async function updateServerStatus(isOnline = true) {
+            const statusElement = document.getElementById('serverStatus');
+            if (isOnline) {
+                statusElement.innerHTML = '<span class="status-indicator status-connected"></span>Server Online';
+            } else {
+                statusElement.innerHTML = '<span class="status-indicator status-disconnected"></span>Server Offline';
+            }
+        }
+
+        async function updateCurrentJobs() {
+            try {
+                const response = await fetch('/api/jobs/groups');
+                const data = await response.json();
+                
+                // Filter to active/processing job groups
+                const activeGroups = data.job_groups ? data.job_groups.filter(group => 
+                    group.status === 'processing' || group.active_count > 0
+                ) : [];
+                
+                document.getElementById('currentJobsCount').textContent = activeGroups.length;
+                
+                const content = document.getElementById('currentJobsContent');
+                if (activeGroups.length === 0) {
+                    content.innerHTML = '<div class="no-data">No jobs currently running</div>';
+                } else {
+                    content.innerHTML = activeGroups.map(group => renderCurrentJobGroup(group)).join('');
+                    // Restore expanded job details
+                    restoreExpandedJobDetails();
+                }
+            } catch (error) {
+                document.getElementById('currentJobsContent').innerHTML = 
+                    '<div class="no-data">Failed to load current jobs</div>';
+            }
+        }
+
+        async function updateQueuedJobs() {
+            try {
+                const response = await fetch('/api/jobs/groups');
+                const data = await response.json();
+                
+                // Filter to queued job groups
+                const queuedGroups = data.job_groups ? data.job_groups.filter(group => 
+                    group.status === 'queued' || group.queued_count > 0
+                ) : [];
+                
+                document.getElementById('queuedJobsCount').textContent = queuedGroups.length;
+                
+                const content = document.getElementById('queuedJobsContent');
+                if (queuedGroups.length === 0) {
+                    content.innerHTML = '<div class="no-data">No jobs in queue</div>';
+                } else {
+                    content.innerHTML = queuedGroups.map(group => renderQueuedJobGroup(group)).join('');
+                    // Restore expanded job details
+                    restoreExpandedJobDetails();
+                }
+            } catch (error) {
+                document.getElementById('queuedJobsContent').innerHTML = 
+                    '<div class="no-data">Failed to load queued jobs</div>';
+            }
+        }
+
+        async function updateClients() {
+            try {
+                const response = await fetch('/api/clients');
+                const data = await response.json();
+                
+                const count = data.clients ? data.clients.length : 0;
+                document.getElementById('clientsCount').textContent = count;
+                
+                const content = document.getElementById('clientsContent');
+                if (count === 0) {
+                    content.innerHTML = '<div class="no-data">No clients connected</div>';
+                } else {
+                    content.innerHTML = data.clients.map(client => renderClient(client)).join('');
+                    // Restore expanded client job details
+                    restoreExpandedClientJobs();
+                }
+            } catch (error) {
+                document.getElementById('clientsContent').innerHTML = 
+                    '<div class="no-data">Failed to load clients</div>';
+            }
+        }
+
+        async function updateRecentJobs() {
+            try {
+                const response = await fetch('/api/groups/completed');
+                const data = await response.json();
+                
+                const count = data.groups ? data.groups.length : 0;
+                document.getElementById('recentJobsCount').textContent = count;
+                
+                const content = document.getElementById('recentJobsContent');
+                if (count === 0) {
+                    content.innerHTML = '<div class="no-data">No recently completed job groups</div>';
+                } else {
+                    content.innerHTML = data.groups.map(group => renderRecentGroup(group)).join('');
+                }
+            } catch (error) {
+                document.getElementById('recentJobsContent').innerHTML = 
+                    '<div class="no-data">Failed to load recent job groups</div>';
+            }
+        }
+
+        function renderCurrentJobGroup(group) {
+            const progress = group.progress_percentage || 0;
+            const processed = group.completed_count || 0;
+            const total = group.total_images || 0;
+            const active = group.active_count || 0;
+            
+            return `
+                <div class="job-item" id="job-group-${group.group_id}">
+                    <div class="item-header">
+                        <div class="item-title">${group.name} [${total} Images]</div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="restart-btn" onclick="stopJobGroup('${group.group_id}')" style="background: linear-gradient(135deg, #9a4a4a, #aa5a5a); border-color: #ba6a6a;">
+                                STOP
+                            </button>
+                            <button class="restart-btn" onclick="toggleJobDetails('${group.group_id}')" style="background: linear-gradient(135deg, #4a4a6a, #5a5a7a); border-color: #6a6a8a;">
+                                DETAILS
+                            </button>
+                        </div>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${progress}%"></div>
+                    </div>
+                    <div class="item-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Total Images:</span>
+                            <span class="detail-value">${total}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Progress:</span>
+                            <span class="detail-value">${processed} of ${total} completed</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Currently Processing:</span>
+                            <span class="detail-value">${active} images</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Status:</span>
+                            <span class="detail-value">${group.status}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Failed:</span>
+                            <span class="detail-value">${group.failed_count || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Created:</span>
+                            <span class="detail-value">${new Date(group.created_time * 1000).toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                    <div class="job-details" id="details-${group.group_id}" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #4a4a4a;">
+                        <div class="loading">Loading details...</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderQueuedJobGroup(group) {
+            const total = group.total_images || 0;
+            const queued = group.queued_count || 0;
+            
+            return `
+                <div class="job-item" id="job-group-${group.group_id}">
+                    <div class="item-header">
+                        <div class="item-title">${group.name} [${total} Images]</div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="restart-btn" onclick="stopJobGroup('${group.group_id}')" style="background: linear-gradient(135deg, #9a4a4a, #aa5a5a); border-color: #ba6a6a;">
+                                STOP
+                            </button>
+                            <button class="restart-btn" onclick="toggleJobDetails('${group.group_id}')" style="background: linear-gradient(135deg, #4a4a6a, #5a5a7a); border-color: #6a6a8a;">
+                                DETAILS
+                            </button>
+                        </div>
+                    </div>
+                    <div class="item-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Total Images:</span>
+                            <span class="detail-value">${total}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Queued:</span>
+                            <span class="detail-value">${queued} images</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Status:</span>
+                            <span class="detail-value">${group.status}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Created:</span>
+                            <span class="detail-value">${new Date(group.created_time * 1000).toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                    <div class="job-details" id="details-${group.group_id}" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #4a4a4a;">
+                        <div class="loading">Loading details...</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderClient(client) {
+            const statusClass = client.is_alive ? 
+                (client.current_jobs && client.current_jobs.length > 0 ? 'status-processing' : 'status-idle') 
+                : 'status-disconnected';
+            
+            const statusText = client.is_alive ? 
+                (client.current_jobs && client.current_jobs.length > 0 ? 'Processing' : 'Idle') 
+                : 'Disconnected';
+            
+            // Create expandable job details
+            const jobDetails = client.current_jobs && client.current_jobs.length > 0 ? `
+                <div class="job-details" id="client-jobs-${client.client_id}" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #4a4a4a;">
+                    ${client.current_jobs.map(jobId => `
+                        <div style="display: flex; justify-content: space-between; padding: 0.25rem; margin: 0.125rem 0; background: #3a3a3a; border-radius: 4px; font-size: 0.85rem;">
+                            <span style="color: #e0e0e0;">Job: ${jobId.substring(0, 12)}...</span>
+                            <span style="color: #b0b0b0;">Processing</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '';
+            
+            return `
+                <div class="client-item">
+                    <div class="item-header">
+                        <div class="item-title">
+                            <span class="status-indicator ${statusClass}"></span>
+                            ${client.client_id || client.address}
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            ${client.current_jobs && client.current_jobs.length > 0 ? `
+                                <button class="restart-btn" onclick="toggleClientJobs('${client.client_id}')" style="background: linear-gradient(135deg, #4a4a6a, #5a5a7a); border-color: #6a6a8a;">
+                                    JOBS
+                                </button>
+                            ` : ''}
+                            <button class="restart-btn" onclick="restartClient('${client.client_id}')">
+                                RESTART
+                            </button>
+                        </div>
+                    </div>
+                    <div class="item-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Client IP:</span>
+                            <span class="detail-value">${client.address}:${client.port || ''}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Status:</span>
+                            <span class="detail-value">${statusText}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Thread Count:</span>
+                            <span class="detail-value">
+                                <input type="number" 
+                                       id="thread-count-${client.client_id}" 
+                                       value="${client.thread_count || 0}" 
+                                       min="1" 
+                                       max="32" 
+                                       style="width: 50px; background: #3a3a3a; color: #e0e0e0; border: 1px solid #4a4a4a; border-radius: 4px; padding: 2px 4px;"
+                                       onchange="updateThreadCount('${client.client_id}', this.value)">
+                            </span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Active Jobs:</span>
+                            <span class="detail-value">${client.current_jobs ? client.current_jobs.length : 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Memory Usage:</span>
+                            <span class="detail-value">${client.available_memory_gb ? 
+                                (client.total_memory_gb - client.available_memory_gb).toFixed(1) + ' GB' : 'Unknown'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Last Heartbeat:</span>
+                            <span class="detail-value">${client.last_heartbeat ? 
+                                new Date(client.last_heartbeat * 1000).toLocaleTimeString() : 'Never'}</span>
+                        </div>
+                    </div>
+                    ${jobDetails}
+                </div>
+            `;
+        }
+
+        function renderRecentGroup(group) {
+            const statusClass = group.status === 'completed' ? 'status-connected' : 
+                               group.status === 'completed_with_errors' ? 'status-processing' : 
+                               'status-disconnected';
+            
+            return `
+                <div class="recent-job-item">
+                    <div class="recent-job-header">
+                        <div class="recent-job-title">
+                            <span class="status-indicator ${statusClass}"></span>
+                            ${group.group_name}
+                        </div>
+                        <div class="recent-job-time">${group.processing_time_formatted}</div>
+                    </div>
+                    <div class="recent-job-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Total Images:</span>
+                            <span class="detail-value">${group.total_images}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Completed:</span>
+                            <span class="detail-value">${group.completed_images}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Failed:</span>
+                            <span class="detail-value">${group.failed_images}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Avg Time/Image:</span>
+                            <span class="detail-value">${group.avg_time_formatted}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Status:</span>
+                            <span class="detail-value">${group.status}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Completed:</span>
+                            <span class="detail-value">${new Date(group.completed_time * 1000).toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderRecentJob(job) {
+            return `
+                <div class="recent-job-item">
+                    <div class="recent-job-header">
+                        <div class="recent-job-title">
+                            <span class="status-indicator status-connected"></span>
+                            ${job.image_name}
+                        </div>
+                        <div class="recent-job-time">${job.processing_time_formatted}</div>
+                    </div>
+                    <div class="recent-job-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Job ID:</span>
+                            <span class="detail-value">${job.job_id.substring(0, 12)}...</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Format:</span>
+                            <span class="detail-value">${job.output_format}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Client:</span>
+                            <span class="detail-value">${job.assigned_client}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Completed:</span>
+                            <span class="detail-value">${new Date(job.completed_at * 1000).toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function toggleJobDetails(groupId) {
+            const detailsElement = document.getElementById(`details-${groupId}`);
+            
+            if (detailsElement && detailsElement.style.display === 'none') {
+                // Show details - track as expanded
+                expandedJobDetails.add(groupId);
+                await loadJobDetails(groupId);
+            } else {
+                // Hide details - remove from expanded state
+                expandedJobDetails.delete(groupId);
+                if (detailsElement) {
+                    detailsElement.style.display = 'none';
+                }
+            }
+        }
+
+        async function loadJobDetails(groupId) {
+            const detailsElement = document.getElementById(`details-${groupId}`);
+            if (!detailsElement) return;
+            
+            detailsElement.style.display = 'block';
+            detailsElement.innerHTML = '<div class="loading">Loading details...</div>';
+            
+            try {
+                const response = await fetch(`/api/jobs/group/${groupId}`);
+                const data = await response.json();
+                
+                if (data.image_jobs && data.image_jobs.length > 0) {
+                    const jobsList = data.image_jobs.map(job => {
+                        const statusClass = job.status === 'completed' ? 'status-connected' : 
+                                           job.status === 'failed' ? 'status-disconnected' :
+                                           job.status === 'active' ? 'status-processing' : 'status-idle';
+                        
+                        return `
+                            <div style="display: flex; justify-content: space-between; padding: 0.5rem; margin: 0.25rem 0; background: #3a3a3a; border-radius: 4px;">
+                                <span style="color: #e0e0e0;">
+                                    <span class="status-indicator ${statusClass}"></span>
+                                    ${job.filename || job.job_id}
+                                </span>
+                                <span style="color: #b0b0b0;">
+                                    ${job.assigned_client || job.status}
+                                    ${job.progress ? ` (${job.progress}%)` : ''}
+                                </span>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    detailsElement.innerHTML = `
+                        <div style="font-weight: 600; margin-bottom: 0.5rem; color: #ffffff;">Individual Images:</div>
+                        ${jobsList}
+                    `;
+                } else {
+                    detailsElement.innerHTML = '<div class="no-data">No image details available</div>';
+                }
+            } catch (error) {
+                detailsElement.innerHTML = '<div class="no-data">Failed to load details</div>';
+            }
+        }
+
+        function toggleClientJobs(clientId) {
+            const detailsElement = document.getElementById(`client-jobs-${clientId}`);
+            
+            if (detailsElement && detailsElement.style.display === 'none') {
+                // Show details - track as expanded
+                expandedClientJobs.add(clientId);
+                detailsElement.style.display = 'block';
+            } else {
+                // Hide details - remove from expanded state
+                expandedClientJobs.delete(clientId);
+                if (detailsElement) {
+                    detailsElement.style.display = 'none';
+                }
+            }
+        }
+
+        async function restartClient(clientId) {
+            try {
+                const response = await fetch(`/api/client/${clientId}/restart`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    console.log(`Restart command sent to client ${clientId}`);
+                    // Update the client list immediately
+                    updateClients();
+                } else {
+                    console.error(`Failed to restart client ${clientId}`);
+                }
+            } catch (error) {
+                console.error(`Error restarting client ${clientId}:`, error);
+            }
+        }
+
+        async function updateThreadCount(clientId, newThreadCount) {
+            try {
+                const threadCount = parseInt(newThreadCount);
+                if (isNaN(threadCount) || threadCount < 1 || threadCount > 32) {
+                    console.error('Invalid thread count:', newThreadCount);
+                    return;
+                }
+                
+                const response = await fetch(`/api/client/${clientId}/threads`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ thread_count: threadCount })
+                });
+                
+                if (response.ok) {
+                    console.log(`Thread count updated for client ${clientId}: ${threadCount}`);
+                    // Show brief success feedback by changing border color
+                    const input = document.getElementById(`thread-count-${clientId}`);
+                    if (input) {
+                        input.style.borderColor = '#4a9a4a';
+                        setTimeout(() => {
+                            input.style.borderColor = '#4a4a4a';
+                        }, 2000);
+                    }
+                } else {
+                    console.error(`Failed to update thread count for client ${clientId}`);
+                    // Reset to previous value on failure
+                    updateClients();
+                }
+            } catch (error) {
+                console.error(`Error updating thread count for ${clientId}:`, error);
+                // Reset to previous value on error
+                updateClients();
+            }
+        }
+
+        function restoreExpandedJobDetails() {
+            // Restore expanded job details after content refresh
+            expandedJobDetails.forEach(groupId => {
+                loadJobDetails(groupId);
+            });
+        }
+
+        function restoreExpandedClientJobs() {
+            // Restore expanded client job details after content refresh
+            expandedClientJobs.forEach(clientId => {
+                const detailsElement = document.getElementById(`client-jobs-${clientId}`);
+                if (detailsElement) {
+                    detailsElement.style.display = 'block';
+                }
+            });
+        }
+
+        async function stopJobGroup(groupId) {
+            if (!confirm(`Are you sure you want to stop job group ${groupId}?\n\nThis will:\n- Remove all queued jobs from this group\n- Cancel currently processing jobs\n- Mark the group as stopped`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/jobs/group/${groupId}/stop`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log(`Stop command sent for job group ${groupId}:`, result);
+                    
+                    // Show success feedback by briefly highlighting the job group
+                    const groupElement = document.getElementById(`job-group-${groupId}`);
+                    if (groupElement) {
+                        groupElement.style.borderColor = '#9a4a4a';
+                        groupElement.style.backgroundColor = '#2a1a1a';
+                        setTimeout(() => {
+                            groupElement.style.borderColor = '#4a4a4a';
+                            groupElement.style.backgroundColor = '#333333';
+                        }, 2000);
+                    }
+                    
+                    // Force immediate update of the job lists
+                    updateCurrentJobs();
+                    updateQueuedJobs();
+                } else {
+                    const errorData = await response.json();
+                    console.error(`Failed to stop job group ${groupId}:`, errorData);
+                    alert(`Failed to stop job group: ${errorData.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error(`Error stopping job group ${groupId}:`, error);
+                alert(`Error stopping job group: ${error.message}`);
+            }
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            stopUpdating();
+        });
+    </script>
+</body>
+</html>

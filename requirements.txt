@@ -1,14 +1,39 @@
-PySide6~=6.5.1.1
-opencv-python~=4.10.0.84
-numpy~=1.26.4
-rawpy~=0.22.0
-imageio~=2.31.6
-psutil~=5.9.5
-Pillow~=10.0.1
-sympy~=1.13.0
-colour-science~=0.4.6
-colour-checker-detection~=0.2.1
-colour-segmentation~=1.9
-ExifRead~=3.0.0
-imageio~=2.31.6
-oiio-python~=3.0.8.1.1
+# Image Space - Requirements
+# Core framework and GUI
+PySide6>=6.5.1.1
+
+# Image processing and computer vision  
+opencv-python>=4.8.0
+numpy>=1.21.0,<2.0.0
+rawpy>=0.17.0
+imageio>=2.31.6
+Pillow>=10.0.1
+tifffile>=2024.6.18
+
+# Color science and calibration
+colour-science>=0.4.6
+colour-checker-detection>=0.1.0
+
+# Professional image I/O
+oiio-python>=3.0.8.1.1
+
+# System monitoring and utilities
+psutil>=5.9.5
+pywin32>=306
+
+# Mathematics and scientific computing
+sympy>=1.13.0
+matplotlib>=3.9.1
+scipy>=1.9.0
+
+# Image metadata
+ExifRead>=3.0.0
+
+# Terminal UI enhancements and console interface
+colorama>=0.4.6
+
+# HTTP client for standalone server
+requests>=2.31.0
+
+# Standard library backports and typing extensions (Python 3.8+ compatibility)
+typing-extensions>=4.0.0
