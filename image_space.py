@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsPixmapItem, QLabel, QRubberBand, QWidget, QGraphicsView, QDialog, QProgressDialog
 )
 from PySide6.QtCore import (
-    QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, Slot, QPropertyAnimation, QEasingCurve, QThread, QMetaObject
+    QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, Slot, QPropertyAnimation, QEasingCurve, QThread, QMetaObject, Property
 )
 from PySide6.QtGui import QColor, QPixmap, QImage, QPainter, QIcon, QCursor, QTransform, QBrush, QKeySequence, QAction
 
@@ -570,7 +570,7 @@ class LoadingSpinner(QLabel):
         self.rotation_angle = angle
         self._render_rotated_pixmap(angle)
     
-    # Property for animation
+    # Qt Property for animation
     def get_rotation(self):
         return self.rotation_angle
     
@@ -578,7 +578,7 @@ class LoadingSpinner(QLabel):
         self.rotation_angle = angle
         self._render_rotated_pixmap(angle)
     
-    rotation = property(get_rotation, set_rotation)
+    rotation = Property(float, fget=get_rotation, fset=set_rotation)
     
     def start_spinning(self):
         """Start the spinning animation."""
