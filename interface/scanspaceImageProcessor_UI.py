@@ -469,23 +469,17 @@ class Ui_MainWindow(object):
 
         self.formLayout_3.setWidget(2, QFormLayout.SpanningRole, self.removeAverageDataPushbutton)
 
-        self.label_13 = QLabel(self.averageExposureToolsTab)
-        self.label_13.setObjectName(u"label_13")
-        self.label_13.setIndent(9)
-
-        self.formLayout_3.setWidget(3, QFormLayout.LabelRole, self.label_13)
-
         self.highlightLimitSpinBox = QSpinBox(self.averageExposureToolsTab)
         self.highlightLimitSpinBox.setObjectName(u"highlightLimitSpinBox")
         self.highlightLimitSpinBox.setValue(96)
 
         self.formLayout_3.setWidget(3, QFormLayout.FieldRole, self.highlightLimitSpinBox)
 
-        self.label_12 = QLabel(self.averageExposureToolsTab)
-        self.label_12.setObjectName(u"label_12")
-        self.label_12.setIndent(9)
+        self.label_13 = QLabel(self.averageExposureToolsTab)
+        self.label_13.setObjectName(u"label_13")
+        self.label_13.setIndent(9)
 
-        self.formLayout_3.setWidget(4, QFormLayout.LabelRole, self.label_12)
+        self.formLayout_3.setWidget(4, QFormLayout.LabelRole, self.label_13)
 
         self.shadowLimitSpinBox = QSpinBox(self.averageExposureToolsTab)
         self.shadowLimitSpinBox.setObjectName(u"shadowLimitSpinBox")
@@ -518,6 +512,12 @@ class Ui_MainWindow(object):
 
 
         self.formLayout_3.setWidget(5, QFormLayout.SpanningRole, self.groupBox_2)
+
+        self.label_12 = QLabel(self.averageExposureToolsTab)
+        self.label_12.setObjectName(u"label_12")
+        self.label_12.setIndent(9)
+
+        self.formLayout_3.setWidget(3, QFormLayout.LabelRole, self.label_12)
 
         self.toolBox.addItem(self.averageExposureToolsTab, u"Average Exposure Tools")
         self.imageNamingTab = QWidget()
@@ -845,7 +845,7 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
 
-        self.toolBox.setCurrentIndex(0)
+        self.toolBox.setCurrentIndex(1)
         self.toolBox.layout().setSpacing(6)
 
 
@@ -905,13 +905,13 @@ class Ui_MainWindow(object):
         self.setSelectedImageAsAveragePushbutton.setText(QCoreApplication.translate("MainWindow", u"Set Selected image as Average", None))
         self.removeAverageDataPushbutton.setText(QCoreApplication.translate("MainWindow", u"Remove Average Data", None))
         self.label_13.setText(QCoreApplication.translate("MainWindow", u"Shadow Limit", None))
-        self.label_12.setText(QCoreApplication.translate("MainWindow", u"Highlight Limit", None))
         self.groupBox_2.setTitle(QCoreApplication.translate("MainWindow", u"Options", None))
 #if QT_CONFIG(tooltip)
         self.displayDebugExposureDataCheckBox.setToolTip(QCoreApplication.translate("MainWindow", u"Display overlays over each image showing the hot and cold spots of each image", None))
 #endif // QT_CONFIG(tooltip)
         self.displayDebugExposureDataCheckBox.setText(QCoreApplication.translate("MainWindow", u"Display debug data", None))
         self.exportMaskedImagesCheckBox.setText(QCoreApplication.translate("MainWindow", u"Export Masked Images", None))
+        self.label_12.setText(QCoreApplication.translate("MainWindow", u"Highlight Limit", None))
         self.toolBox.setItemText(self.toolBox.indexOf(self.averageExposureToolsTab), QCoreApplication.translate("MainWindow", u"Average Exposure Tools", None))
         self.label_5.setText(QCoreApplication.translate("MainWindow", u"Image Prefix", None))
 #if QT_CONFIG(tooltip)
