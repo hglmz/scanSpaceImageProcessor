@@ -18,8 +18,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QCheckBox, QComboBox,
     QDialog, QDialogButtonBox, QFrame, QGridLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QRadioButton, QSizePolicy, QSpacerItem, QSpinBox,
-    QTabWidget, QWidget)
+    QSizePolicy, QSpacerItem, QSpinBox, QTabWidget,
+    QWidget)
 
 class Ui_ImageProcessorSettings(object):
     def setupUi(self, ImageProcessorSettings):
@@ -153,11 +153,11 @@ class Ui_ImageProcessorSettings(object):
 
         self.applicationGeneralGridLayout.addItem(self.verticalSpacer_2, 24, 1, 1, 1)
 
-        self.enableExperimentalFeaturesCheckbox = QCheckBox(self.generalSettingsTab)
-        self.enableExperimentalFeaturesCheckbox.setObjectName(u"enableExperimentalFeaturesCheckbox")
-        self.enableExperimentalFeaturesCheckbox.setEnabled(False)
+        self.enableDarkThemeCheckbox = QCheckBox(self.generalSettingsTab)
+        self.enableDarkThemeCheckbox.setObjectName(u"enableDarkThemeCheckbox")
+        self.enableDarkThemeCheckbox.setEnabled(True)
 
-        self.applicationGeneralGridLayout.addWidget(self.enableExperimentalFeaturesCheckbox, 5, 2, 1, 1)
+        self.applicationGeneralGridLayout.addWidget(self.enableDarkThemeCheckbox, 5, 2, 1, 1)
 
         self.usePrecalculatedChartsCheckBox = QCheckBox(self.generalSettingsTab)
         self.usePrecalculatedChartsCheckBox.setObjectName(u"usePrecalculatedChartsCheckBox")
@@ -170,12 +170,6 @@ class Ui_ImageProcessorSettings(object):
 
         self.applicationGeneralGridLayout.addWidget(self.displayLogCheckBox, 2, 2, 1, 1)
 
-        self.automaticLoadBalancingCheckbox = QCheckBox(self.generalSettingsTab)
-        self.automaticLoadBalancingCheckbox.setObjectName(u"automaticLoadBalancingCheckbox")
-        self.automaticLoadBalancingCheckbox.setEnabled(False)
-
-        self.applicationGeneralGridLayout.addWidget(self.automaticLoadBalancingCheckbox, 3, 2, 1, 1)
-
         self.exifAuthorsLineEdit = QLineEdit(self.generalSettingsTab)
         self.exifAuthorsLineEdit.setObjectName(u"exifAuthorsLineEdit")
         self.exifAuthorsLineEdit.setEnabled(False)
@@ -185,7 +179,7 @@ class Ui_ImageProcessorSettings(object):
         self.colorCorrectThumbnailsCheckbox = QCheckBox(self.generalSettingsTab)
         self.colorCorrectThumbnailsCheckbox.setObjectName(u"colorCorrectThumbnailsCheckbox")
 
-        self.applicationGeneralGridLayout.addWidget(self.colorCorrectThumbnailsCheckbox, 4, 2, 1, 1)
+        self.applicationGeneralGridLayout.addWidget(self.colorCorrectThumbnailsCheckbox, 5, 1, 1, 1)
 
 
         self.gridLayout_5.addLayout(self.applicationGeneralGridLayout, 0, 0, 1, 1)
@@ -292,96 +286,29 @@ class Ui_ImageProcessorSettings(object):
         self.gridLayout_8.setObjectName(u"gridLayout_8")
         self.serverSettingsGridLayout = QGridLayout()
         self.serverSettingsGridLayout.setObjectName(u"serverSettingsGridLayout")
-        self.line = QFrame(self.serverSettingsTab)
-        self.line.setObjectName(u"line")
-        self.line.setFrameShape(QFrame.HLine)
-        self.line.setFrameShadow(QFrame.Sunken)
-
-        self.serverSettingsGridLayout.addWidget(self.line, 7, 0, 1, 3)
-
         self.verticalSpacer_4 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
 
-        self.serverSettingsGridLayout.addItem(self.verticalSpacer_4, 11, 1, 1, 1)
-
-        self.processingNodeRadioButton = QRadioButton(self.serverSettingsTab)
-        self.processingNodeRadioButton.setObjectName(u"processingNodeRadioButton")
-
-        self.serverSettingsGridLayout.addWidget(self.processingNodeRadioButton, 5, 1, 1, 1)
-
-        self.label_9 = QLabel(self.serverSettingsTab)
-        self.label_9.setObjectName(u"label_9")
-        self.label_9.setEnabled(False)
-
-        self.serverSettingsGridLayout.addWidget(self.label_9, 10, 0, 1, 1)
+        self.serverSettingsGridLayout.addItem(self.verticalSpacer_4, 5, 1, 1, 1)
 
         self.hostServerAddressLineEdit = QLineEdit(self.serverSettingsTab)
         self.hostServerAddressLineEdit.setObjectName(u"hostServerAddressLineEdit")
 
         self.serverSettingsGridLayout.addWidget(self.hostServerAddressLineEdit, 0, 1, 1, 2)
 
-        self.label_7 = QLabel(self.serverSettingsTab)
-        self.label_7.setObjectName(u"label_7")
-        self.label_7.setMaximumSize(QSize(16777215, 20))
-        font1 = QFont()
-        font1.setBold(True)
-        font1.setUnderline(False)
-        self.label_7.setFont(font1)
-        self.label_7.setAlignment(Qt.AlignCenter)
-
-        self.serverSettingsGridLayout.addWidget(self.label_7, 3, 0, 1, 3)
-
-        self.serverAddressLineEdit = QLineEdit(self.serverSettingsTab)
-        self.serverAddressLineEdit.setObjectName(u"serverAddressLineEdit")
-
-        self.serverSettingsGridLayout.addWidget(self.serverAddressLineEdit, 9, 1, 1, 2)
-
-        self.label_10 = QLabel(self.serverSettingsTab)
-        self.label_10.setObjectName(u"label_10")
-
-        self.serverSettingsGridLayout.addWidget(self.label_10, 5, 0, 1, 1)
-
-        self.hostServerIPtextEdit = QLineEdit(self.serverSettingsTab)
-        self.hostServerIPtextEdit.setObjectName(u"hostServerIPtextEdit")
-
-        self.serverSettingsGridLayout.addWidget(self.hostServerIPtextEdit, 6, 2, 1, 1)
-
-        self.label_2 = QLabel(self.serverSettingsTab)
-        self.label_2.setObjectName(u"label_2")
-
-        self.serverSettingsGridLayout.addWidget(self.label_2, 9, 0, 1, 1)
-
-        self.processImagesOnHostCheckbox = QCheckBox(self.serverSettingsTab)
-        self.processImagesOnHostCheckbox.setObjectName(u"processImagesOnHostCheckbox")
-        self.processImagesOnHostCheckbox.setChecked(True)
-
-        self.serverSettingsGridLayout.addWidget(self.processImagesOnHostCheckbox, 6, 1, 1, 1)
-
-        self.enableServerCheckbox = QCheckBox(self.serverSettingsTab)
-        self.enableServerCheckbox.setObjectName(u"enableServerCheckbox")
-        font2 = QFont()
-        font2.setPointSize(10)
-        font2.setBold(True)
-        self.enableServerCheckbox.setFont(font2)
-        self.enableServerCheckbox.setIconSize(QSize(20, 20))
-
-        self.serverSettingsGridLayout.addWidget(self.enableServerCheckbox, 0, 0, 1, 1)
-
-        self.hostServerRadioButton = QRadioButton(self.serverSettingsTab)
-        self.hostServerRadioButton.setObjectName(u"hostServerRadioButton")
-        self.hostServerRadioButton.setChecked(True)
-
-        self.serverSettingsGridLayout.addWidget(self.hostServerRadioButton, 5, 2, 1, 1)
-
-        self.storageServerAddressLineEdit = QLineEdit(self.serverSettingsTab)
-        self.storageServerAddressLineEdit.setObjectName(u"storageServerAddressLineEdit")
-        self.storageServerAddressLineEdit.setEnabled(False)
-
-        self.serverSettingsGridLayout.addWidget(self.storageServerAddressLineEdit, 10, 1, 1, 2)
-
         self.openServerHelpPushButton = QPushButton(self.serverSettingsTab)
         self.openServerHelpPushButton.setObjectName(u"openServerHelpPushButton")
 
         self.serverSettingsGridLayout.addWidget(self.openServerHelpPushButton, 1, 2, 1, 1)
+
+        self.enableServerCheckbox = QCheckBox(self.serverSettingsTab)
+        self.enableServerCheckbox.setObjectName(u"enableServerCheckbox")
+        font1 = QFont()
+        font1.setPointSize(10)
+        font1.setBold(True)
+        self.enableServerCheckbox.setFont(font1)
+        self.enableServerCheckbox.setIconSize(QSize(20, 20))
+
+        self.serverSettingsGridLayout.addWidget(self.enableServerCheckbox, 0, 0, 1, 1)
 
 
         self.gridLayout_8.addLayout(self.serverSettingsGridLayout, 1, 0, 1, 1)
@@ -438,15 +365,11 @@ class Ui_ImageProcessorSettings(object):
 #endif // QT_CONFIG(tooltip)
         self.bitDepth16EnableCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"16 Bit Default", None))
 #if QT_CONFIG(tooltip)
-        self.enableExperimentalFeaturesCheckbox.setToolTip(QCoreApplication.translate("ImageProcessorSettings", u"Enables experimental features. WARNING THIS MAY PRODUCE UNWANTED RESULTS", None))
+        self.enableDarkThemeCheckbox.setToolTip(QCoreApplication.translate("ImageProcessorSettings", u"Enables experimental features. WARNING THIS MAY PRODUCE UNWANTED RESULTS", None))
 #endif // QT_CONFIG(tooltip)
-        self.enableExperimentalFeaturesCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Enable Experimental Features", None))
+        self.enableDarkThemeCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Dark Theme", None))
         self.usePrecalculatedChartsCheckBox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Use Precalculated Charts", None))
         self.displayLogCheckBox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Display Log", None))
-#if QT_CONFIG(tooltip)
-        self.automaticLoadBalancingCheckbox.setToolTip(QCoreApplication.translate("ImageProcessorSettings", u"Automatically adjusts the number of images being processed if system usage exceeds usable levels", None))
-#endif // QT_CONFIG(tooltip)
-        self.automaticLoadBalancingCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Automatic Load Balancing", None))
         self.exifAuthorsLineEdit.setPlaceholderText(QCoreApplication.translate("ImageProcessorSettings", u"Authors", None))
         self.colorCorrectThumbnailsCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Display thumbnails with colour correction", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.generalSettingsTab), QCoreApplication.translate("ImageProcessorSettings", u"General Settings", None))
@@ -480,23 +403,9 @@ class Ui_ImageProcessorSettings(object):
         self.label_5.setText(QCoreApplication.translate("ImageProcessorSettings", u"Import Settings", None))
         self.schema_preview_label.setText(QCoreApplication.translate("ImageProcessorSettings", u"Schema Preview", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.importExportRules), QCoreApplication.translate("ImageProcessorSettings", u"Import and Export", None))
-        self.processingNodeRadioButton.setText(QCoreApplication.translate("ImageProcessorSettings", u"Processing Node", None))
-        self.label_9.setText(QCoreApplication.translate("ImageProcessorSettings", u"Storage Server Address", None))
         self.hostServerAddressLineEdit.setPlaceholderText(QCoreApplication.translate("ImageProcessorSettings", u"Server address", None))
-        self.label_7.setText(QCoreApplication.translate("ImageProcessorSettings", u"Old Client/Server Settings", None))
-#if QT_CONFIG(tooltip)
-        self.serverAddressLineEdit.setToolTip(QCoreApplication.translate("ImageProcessorSettings", u"Local IP address of the host server", None))
-#endif // QT_CONFIG(tooltip)
-        self.label_10.setText(QCoreApplication.translate("ImageProcessorSettings", u"Application State", None))
-        self.hostServerIPtextEdit.setPlaceholderText(QCoreApplication.translate("ImageProcessorSettings", u"Host IP address", None))
-        self.label_2.setText(QCoreApplication.translate("ImageProcessorSettings", u"Server Address:", None))
-#if QT_CONFIG(tooltip)
-        self.processImagesOnHostCheckbox.setToolTip(QCoreApplication.translate("ImageProcessorSettings", u"If set, the host machine will process images as well as clients", None))
-#endif // QT_CONFIG(tooltip)
-        self.processImagesOnHostCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Process Images on Host", None))
-        self.enableServerCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Enable Server Connections", None))
-        self.hostServerRadioButton.setText(QCoreApplication.translate("ImageProcessorSettings", u"Host Server", None))
         self.openServerHelpPushButton.setText(QCoreApplication.translate("ImageProcessorSettings", u"Help", None))
+        self.enableServerCheckbox.setText(QCoreApplication.translate("ImageProcessorSettings", u"Enable Server Connections", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.serverSettingsTab), QCoreApplication.translate("ImageProcessorSettings", u"Server Settings", None))
     # retranslateUi
 

@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import (
     QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, Slot, QPropertyAnimation, QEasingCurve, QThread, QMetaObject
 )
-from PySide6.QtGui import QColor, QPixmap, QImage, QPainter, QIcon, QCursor, QTransform
+from PySide6.QtGui import QColor, QPixmap, QImage, QPainter, QIcon, QCursor, QTransform, QBrush, QKeySequence, QAction
 
 from interface.scanspaceImageProcessor_UI import Ui_MainWindow
 from interface.settings_UI import Ui_ImageProcessorSettings
@@ -35,6 +35,7 @@ from ImageProcessor.imageLoader import ImageLoader, RawLoadWorker
 from ImageProcessor.fileNamingSchema import FileNamingSchema
 from ImageProcessor.serverClient import ServerConnectionError, ServerAPIError
 from ImageProcessor.editingTools import apply_all_adjustments
+from ImageProcessor.themes import theme_manager
 
 # Logging system
 from enum import IntEnum
@@ -228,9 +229,6 @@ class ImageProcessorSettingsDialog(QDialog):
         correct_thumbnails = settings.value('correct_thumbnails', False, type=bool)
         log_level = settings.value('log_level', LogLevel.INFO, type=int)
         
-        # Load network settings
-        host_server_address = settings.value('host_server_address', '', type=str)
-        
         # Load import/export settings
         look_in_subfolders = settings.value('look_in_subfolders', False, type=bool)
         group_by_subfolder = settings.value('group_by_subfolder', False, type=bool)
@@ -246,12 +244,14 @@ class ImageProcessorSettingsDialog(QDialog):
         
         # Load server/client settings
         enable_server = settings.value('enable_server', False, type=bool)
-        is_host_server = settings.value('is_host_server', True, type=bool)
-        process_on_host = settings.value('process_on_host', True, type=bool)
-        server_address = settings.value('server_address', '', type=str)
-        host_server_ip = settings.value('host_server_ip', '', type=str)
+        # Load network settings
+        host_server_address = settings.value('host_server_address', '', type=str)
+
+        # Theme Settings
+        dark_mode = settings.value('dark_mode', False, type=bool)
         
         # Apply settings to UI controls
+        self.ui.enableDarkThemeCheckbox.setChecked(dark_mode)
         self.ui.displayLogCheckBox.setChecked(display_log)
         self.ui.defaultThreadCountSpinbox.setValue(thread_count)
         self.ui.colorCorrectThumbnailsCheckbox.setChecked(correct_thumbnails)
@@ -285,11 +285,7 @@ class ImageProcessorSettingsDialog(QDialog):
         # Set default color chart settings
         self.ui.usePrecalculatedChartsCheckBox.setChecked(use_precalc_charts)
         self.ui.chartFolderPathLineEdit.setText(chart_folder_path)
-        
-        # Set network settings
-        if hasattr(self.ui, 'hostServerAddressLineEdit'):
-            self.ui.hostServerAddressLineEdit.setText(host_server_address)
-        
+
         # Set import/export settings
         self.ui.lookForImagesInSubfolderCheckbox.setChecked(look_in_subfolders)
         self.ui.groupImagesBySubfolderCheckbox.setChecked(group_by_subfolder)
@@ -305,14 +301,8 @@ class ImageProcessorSettingsDialog(QDialog):
         
         # Set server/client settings
         self.ui.enableServerCheckbox.setChecked(enable_server)
-        self.ui.hostServerRadioButton.setChecked(is_host_server)
-        self.ui.processingNodeRadioButton.setChecked(not is_host_server)
-        self.ui.processImagesOnHostCheckbox.setChecked(process_on_host)
-        self.ui.serverAddressLineEdit.setText(server_address)
-        self.ui.hostServerIPtextEdit.setText(host_server_ip)
-        
-        # Setup server settings UI behavior
-        self._setup_server_settings_ui()
+        if hasattr(self.ui, 'hostServerAddressLineEdit'):
+            self.ui.hostServerAddressLineEdit.setText(host_server_address)
     
     def save_settings(self):
         """
@@ -365,10 +355,9 @@ class ImageProcessorSettingsDialog(QDialog):
         
         # Save server/client settings
         settings.setValue('enable_server', self.ui.enableServerCheckbox.isChecked())
-        settings.setValue('is_host_server', self.ui.hostServerRadioButton.isChecked())
-        settings.setValue('process_on_host', self.ui.processImagesOnHostCheckbox.isChecked())
-        settings.setValue('server_address', self.ui.serverAddressLineEdit.text())
-        settings.setValue('host_server_ip', self.ui.hostServerIPtextEdit.text())
+
+        # Save theme settings
+        settings.setValue('dark_mode', self.ui.enableDarkThemeCheckbox.isChecked())
         
         # Ensure settings are written to disk
         settings.sync()
@@ -488,76 +477,8 @@ class ImageProcessorSettingsDialog(QDialog):
                 self.schema_preview_label.setStyleSheet(
                     "QLabel { color: #f44336; font-size: 10px; margin: 2px; }"
                 )
-    
-    def _setup_server_settings_ui(self):
-        """Setup server settings UI behavior and connections."""
-        import socket
-        
-        # Connect enable server checkbox to update UI state
-        self.ui.enableServerCheckbox.toggled.connect(self._on_enable_server_changed)
-        
-        # Connect radio buttons to update UI state
-        self.ui.hostServerRadioButton.toggled.connect(self._on_server_mode_changed)
-        self.ui.processingNodeRadioButton.toggled.connect(self._on_server_mode_changed)
-        
-        # Auto-populate host IP address
-        try:
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            if not self.ui.hostServerIPtextEdit.text():
-                self.ui.hostServerIPtextEdit.setText(f"{local_ip}:8888")
-        except:
-            if not self.ui.hostServerIPtextEdit.text():
-                self.ui.hostServerIPtextEdit.setText("localhost:8888")
-        
-        # Set initial UI state
-        self._on_enable_server_changed()
-        self._on_server_mode_changed()
-    
-    def _on_enable_server_changed(self):
-        """Handle enable server checkbox changes."""
-        server_enabled = self.ui.enableServerCheckbox.isChecked()
-        
-        # Enable/disable all server-related controls
-        self.ui.hostServerRadioButton.setEnabled(server_enabled)
-        self.ui.processingNodeRadioButton.setEnabled(server_enabled)
-        self.ui.processImagesOnHostCheckbox.setEnabled(server_enabled)
-        self.ui.serverAddressLineEdit.setEnabled(server_enabled)
-        self.ui.hostServerIPtextEdit.setEnabled(server_enabled)
-        
-        # Update tooltips
-        if not server_enabled:
-            self.ui.hostServerRadioButton.setToolTip("Server functionality is disabled")
-            self.ui.processingNodeRadioButton.setToolTip("Server functionality is disabled")
-            self.ui.serverAddressLineEdit.setToolTip("Server functionality is disabled")
-            self.ui.hostServerIPtextEdit.setToolTip("Server functionality is disabled")
-        else:
-            self.ui.hostServerRadioButton.setToolTip("")
-            self.ui.processingNodeRadioButton.setToolTip("")
-            # Reset to normal tooltips based on mode
-            self._on_server_mode_changed()
 
-    def _on_server_mode_changed(self):
-        """Handle server mode radio button changes."""
-        if not self.ui.enableServerCheckbox.isChecked():
-            return  # Don't change anything if server is disabled
-            
-        is_host_mode = self.ui.hostServerRadioButton.isChecked()
-        
-        # Enable/disable server address input based on mode
-        self.ui.serverAddressLineEdit.setEnabled(not is_host_mode)
-        
-        # Show/hide relevant settings
-        self.ui.processImagesOnHostCheckbox.setVisible(is_host_mode)
-        self.ui.hostServerIPtextEdit.setVisible(is_host_mode)
-        
-        # Update labels and tooltips
-        if is_host_mode:
-            self.ui.hostServerIPtextEdit.setToolTip("IP address and port that clients will connect to")
-            self.ui.serverAddressLineEdit.setToolTip("Disabled in host server mode")
-        else:
-            self.ui.serverAddressLineEdit.setToolTip("Enter the host server IP address and port (e.g., 192.168.1.100:8888)")
-    
+
     def accept(self):
         """Override accept to save settings and apply them to main window."""
         self.save_settings()
@@ -680,6 +601,9 @@ class MainWindow(QMainWindow):
         # ────────────────────────────────────────────────────────────
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        
+        # Apply saved theme
+        theme_manager.apply_theme(self)
 
         # Connect signal for thread-safe UI updates
         self.update_status_signal.connect(self.update_image_status)
@@ -735,11 +659,11 @@ class MainWindow(QMainWindow):
         self.ui.detectChartToolshelfFrame.setVisible(False)
         self.ui.colourChartDebugToolsFrame.setVisible(False)  # via setup_debug_views()
         self.ui.processingStatusBarFrame.setVisible(False) # hide our processing status bar
+        self.ui.chartInformationLabel.setVisible(False)
         self.cursor = None
 
         # Disable buttons until prerequisites are met
         for btn in (
-            self.ui.manuallySelectChartPushbutton,
             self.ui.detectChartShelfPushbutton,
             self.ui.showOriginalImagePushbutton,
             self.ui.flattenChartImagePushButton,
@@ -1002,6 +926,19 @@ class MainWindow(QMainWindow):
         
         # Load and apply settings from INI file
         self.apply_settings()
+    
+    def switch_theme(self, theme_name):
+        """Switch to the specified theme."""
+        # Apply theme
+        theme_manager.apply_theme(self, theme_name)
+        theme_manager.save_theme_preference(theme_name)
+        
+        # Update graphics view background for better visibility
+        colors = theme_manager.get_theme_colors(theme_name)
+        self.ui.imagePreviewGraphicsView.setBackgroundBrush(QColor(colors['background']))
+        
+        # Log the change
+        self.log_info(f"Switched to {theme_name} theme")
         
         # Initialize network mode after settings are applied
         self._update_network_mode()
@@ -1098,6 +1035,13 @@ class MainWindow(QMainWindow):
         # Update network mode only when explicitly requested (when network settings change)
         if update_network:
             self._update_network_mode()
+
+        # Set the application theme
+        theme = settings.value('dark_mode', False, type=bool)
+        if theme:
+            self.switch_theme('dark')
+        else:
+            self.switch_theme('light')
         
         self.log_info("[Settings] Settings applied successfully")
 
@@ -2266,25 +2210,21 @@ IMAGE ADJUSTMENTS:"""
         """Update network processing mode based on settings."""
         settings = QSettings('ScanSpace', 'ImageProcessor')
         enable_server = settings.value('enable_server', False, type=bool)
-        # is_host_server = settings.value('is_host_server', True, type=bool)
-        # process_on_host = settings.value('process_on_host', True, type=bool)
-        # server_address = settings.value('server_address', '', type=str)
         host_server_address = settings.value('host_server_address', '', type=str)
-        #
-        # # Stop existing server/client
-        # self._stop_network_processing()
         
         # If we have a host server address configured, use job-sending mode instead of processing client
         if host_server_address:
             self.network_mode = 'job_sender'
             self.log_info(f"[Network] Job sending mode enabled for server: {host_server_address}")
             self.update_server_status_label("Ready to send jobs")
+            self.ui.sendProjectToServerPushButton.setEnabled(True)
             return
         
         # Only start network processing if server is enabled
         if not enable_server:
             self.network_mode = 'local'
             self.log_info("[Network] Server functionality is disabled in settings")
+            self.ui.sendProjectToServerPushButton.setEnabled(False)
             return
 
 
@@ -2417,14 +2357,10 @@ IMAGE ADJUSTMENTS:"""
         self.flatten_mode = False
         self.corner_points = []
         self.showing_chart_preview = False
-        self.ui.manuallySelectChartPushbutton.setEnabled(False)
 
         # Clear preview, chart path, and instruction label
         self.previewScene.clear()
         self.ui.chartPathLineEdit.clear()
-        if self.instruction_label:
-            self.instruction_label.hide()
-            self.instruction_label = None
 
         # Clear debug tools and disable advanced UI actions
         self.ui.colourChartDebugToolsFrame.setVisible(False)
@@ -2434,6 +2370,10 @@ IMAGE ADJUSTMENTS:"""
         self.ui.showOriginalImagePushbutton.setEnabled(False)
         self.ui.detectChartShelfPushbutton.setEnabled(False)
         self.ui.finalizeChartPushbutton.setStyleSheet('')
+        self.ui.chartInformationLabel.setVisible(False)
+
+        # Reset edit fields
+        self.reset_image_editing_sliders(update=False)
 
         # Remove all thumbnail widgets in the holder
         holder = self.ui.thumbnailPreviewDisplayFrame_holder
@@ -2701,7 +2641,7 @@ IMAGE ADJUSTMENTS:"""
         # show exr options
         self.ui.exrOptionsFrame.setVisible(fmt == '.exr')
 
-    def set_selected_as_chart(self):
+    def set_selected_as_chart(self, detect=True):
         """
         Mark the currently selected image in the list as the reference colour chart.
         Clears any prior chart flags, sets the 'chart' metadata on the new selection,
@@ -2759,11 +2699,11 @@ IMAGE ADJUSTMENTS:"""
         # Update UI to show group context
         self.ui.chartPathLineEdit.setText(f"[{group_name}] {os.path.basename(chart_path)}")
         self.log_info(f"[Select] Chart set to {os.path.basename(chart_path)} for group '{group_name}'")
-        self.ui.manuallySelectChartPushbutton.setEnabled(True)
 
         # Store group information for calibration
         self.current_chart_group = group_name
-        self.detect_chart(input_source=chart_path, is_npy=False)
+        if detect:
+            self.detect_chart(input_source=chart_path, is_npy=False)
 
     @ChartTools.exit_manual_mode
     def preview_selected(self):
@@ -2822,10 +2762,8 @@ IMAGE ADJUSTMENTS:"""
         if meta.get('chart'):
             self.corrected_preview_pixmap = self.pixmap_from_array(meta['debug_images']['corrected_image'])
             self.show_debug_frame(True)
-            self.ui.manuallySelectChartPushbutton.setEnabled(True)
         else:
             self.show_debug_frame(False)
-            self.ui.manuallySelectChartPushbutton.setEnabled(False)
 
         if self.ui.displayDebugExposureDataCheckBox.isChecked():
             self.show_exposure_debug_overlay()
@@ -3764,6 +3702,8 @@ IMAGE ADJUSTMENTS:"""
     @ChartTools.exit_manual_mode
     def manually_select_chart(self):
         """Enter manual chart selection mode using ChartTools."""
+        # check if the selected image is marked as chart, if not, mark it but don't detect chart)
+        self.set_selected_as_chart(detect=False)
         ChartTools.manually_select_chart(self)
 
     def on_manual_crop_complete(self, rect: QRect):
@@ -4186,8 +4126,6 @@ IMAGE ADJUSTMENTS:"""
 
         # 2) Hide any debug/chart overlay
         self.show_debug_frame(False)
-        if hasattr(self, 'instruction_label'):
-            self.instruction_label.hide()
 
         # 3) Remove any rubber‐band selection
         if hasattr(self, 'rubberBand') and self.rubberBand.isVisible():
@@ -4729,7 +4667,7 @@ IMAGE ADJUSTMENTS:"""
             self._sync_highlight_controls = True
         self._update_preview_display()
 
-    def reset_image_editing_sliders(self):
+    def reset_image_editing_sliders(self, update=True):
         """Reset image editing sliders."""
         self._sync_highlight_controls = False
         self._sync_denoise_controls = False
@@ -4759,7 +4697,8 @@ IMAGE ADJUSTMENTS:"""
         self._sync_highlight_controls = True
         self._sync_denoise_controls = True
         self._sync_sharpen_controls = True
-        self._update_preview_display()
+        if update:
+            self._update_preview_display()
 
     def on_white_balance_checkbox_changed(self, checked):
         """Handle white balance checkbox change."""

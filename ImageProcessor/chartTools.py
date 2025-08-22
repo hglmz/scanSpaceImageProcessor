@@ -172,14 +172,13 @@ class ChartTools:
 
         # 6) Hide the toolshelf & instruction overlay
         main_window.ui.detectChartToolshelfFrame.setVisible(False)
-        if hasattr(main_window, 'instruction_label') and isinstance(main_window.instruction_label, QLabel):
-            main_window.instruction_label.hide()
+        main_window.ui.chartInformationLabel.setVisible(False)
 
         # 7) Hide debug frame if present
         main_window.show_debug_frame(False)
     
     @staticmethod
-    def set_chart_tools_enabled(main_window, *, manual=False, detect=False, show=False, flatten=False, finalize=False):
+    def set_chart_tools_enabled(main_window, *, manual=True, detect=False, show=False, flatten=False, finalize=False):
         """
         Enable or disable all chart-tools buttons with optional highlight on Manual & Flatten.
         
@@ -192,7 +191,7 @@ class ChartTools:
             finalize: Enable finalize chart button
         """
         mapping = {
-            'manual':   main_window.ui.manuallySelectChartPushbutton,
+            'manual': main_window.ui.manuallySelectChartPushbutton,
             'detect':   main_window.ui.detectChartShelfPushbutton,
             'show':     main_window.ui.showOriginalImagePushbutton,
             'flatten':  main_window.ui.flattenChartImagePushButton,
@@ -203,11 +202,7 @@ class ChartTools:
         for key, btn in mapping.items():
             enabled = local_vars[key]
             btn.setEnabled(enabled)
-            # highlight Manual & Flatten when active
-            if (key == 'manual' and enabled) or (key == 'flatten' and enabled):
-                btn.setStyleSheet("background-color: #A5D6A7")
-            else:
-                btn.setStyleSheet("")
+
     
     @staticmethod
     def manually_select_chart(main_window):
@@ -280,17 +275,9 @@ class ChartTools:
         ChartTools.set_chart_tools_enabled(main_window, manual=True)
 
         # Show instruction label
-        instr = getattr(main_window, 'instruction_label', None)
-        if isinstance(instr, QLabel):
-            instr.setText("Click and drag box around the colour chart")
-            instr.show()
-        else:
-            main_window.instruction_label = QLabel("Click and drag box around the colour chart")
-            main_window.instruction_label.setAlignment(Qt.AlignCenter)
-            main_window.ui.verticalLayout_4.insertWidget(
-                main_window.ui.verticalLayout_4.indexOf(main_window.ui.imagePreviewGraphicsView),
-                main_window.instruction_label
-            )
+        main_window.ui.chartInformationLabel.setVisible(True)
+        main_window.ui.chartInformationLabel.setText("Click and drag box around the colour chart")
+
         # Reveal toolshelf
         main_window.ui.detectChartToolshelfFrame.setVisible(True)
     
@@ -308,9 +295,7 @@ class ChartTools:
         main_window.ui.showOriginalImagePushbutton.setEnabled(True)
         main_window.ui.imagePreviewGraphicsView.unsetCursor()
 
-        css = "background-color: #A5D6A7"
         main_window.ui.flattenChartImagePushButton.setEnabled(True)
-        main_window.ui.flattenChartImagePushButton.setStyleSheet(css)
     
     @staticmethod
     def flatten_chart_image(main_window):
@@ -326,9 +311,7 @@ class ChartTools:
             return
 
         main_window.log('[Flatten] Select the 4 corners of the chart')
-        main_window.instruction_label.setText('Select the 4 corners of the chart')
-        css = "background-color: #A5D6A7"
-        main_window.ui.flattenChartImagePushButton.setStyleSheet(css)
+        main_window.ui.chartInformationLabel.setText('Select the 4 corners of the chart')
 
         cursor_pixmap = QPixmap(r'resources/icons/crosshair.svg')
         main_window.cursor = cursor_pixmap
@@ -476,9 +459,296 @@ class ChartTools:
         return True
     
     @staticmethod
+    def detect_chart_rotation_from_corners(corner_points, warped_image, swatch_width, swatch_height, padding):
+        """
+        Detect chart rotation using corner point distances and gradient analysis.
+        
+        Uses the corner points to determine if we have a 6x4 or 4x6 orientation,
+        then finds the white-to-black gradient and calculates the rotation needed.
+        
+        Args:
+            corner_points: List of 4 corner points [(x1,y1), (x2,y2), (x3,y3), (x4,y4)]
+            warped_image: numpy array of the warped chart image  
+            swatch_width: width of each swatch in pixels
+            swatch_height: height of each swatch in pixels
+            padding: padding around the chart
+            
+        Returns:
+            int: rotation needed in 90-degree steps (0, 1, 2, 3 for 0°, 90°, 180°, 270°)
+        """
+        
+        def distance(p1, p2):
+            """Calculate Euclidean distance between two points"""
+            return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+        
+        def get_swatch_lightness(image, row, col, sw_w, sw_h, pad):
+            """Extract average lightness from a swatch position"""
+            x_start = pad + col * sw_w + sw_w // 4
+            x_end = pad + col * sw_w + 3 * sw_w // 4
+            y_start = pad + row * sw_h + sw_h // 4
+            y_end = pad + row * sw_h + 3 * sw_h // 4
+            
+            # Bounds checking for image dimensions
+            img_h, img_w = image.shape[:2]
+            if x_end >= img_w or y_end >= img_h or x_start < 0 or y_start < 0:
+                return None
+            
+            # Extract center region of swatch to avoid edge artifacts
+            swatch_region = image[y_start:y_end, x_start:x_end]
+            if swatch_region.size == 0:
+                return None
+            
+            # Calculate perceptual lightness (Y in YUV)
+            avg_color = np.mean(swatch_region, axis=(0, 1))
+            return 0.299 * avg_color[0] + 0.587 * avg_color[1] + 0.114 * avg_color[2]
+        
+        def check_gradient_quality(lightness_values):
+            """Check how well a sequence matches white-to-black gradient"""
+            valid_values = [v for v in lightness_values if v is not None]
+            if len(valid_values) != 6:
+                return float('inf')
+            
+            total_decrease = 0
+            violations = 0
+            
+            for i in range(len(valid_values) - 1):
+                diff = valid_values[i] - valid_values[i + 1]
+                if diff > 0:
+                    total_decrease += diff
+                else:
+                    violations += 1
+            
+            lightness_range = max(valid_values) - min(valid_values)
+            score = violations * 100 - total_decrease - lightness_range
+            
+            if lightness_range < 80:
+                score += 200
+                
+            return score
+        
+        # Calculate distances between adjacent corner points to determine orientation
+        # Points are: [top-left, top-right, bottom-right, bottom-left] (clockwise)
+        side1_dist = distance(corner_points[0], corner_points[1])  # top edge
+        side2_dist = distance(corner_points[1], corner_points[2])  # right edge
+        
+        print(f"[DEBUG] Corner distances: side1={side1_dist:.1f}, side2={side2_dist:.1f}")
+        
+        # Determine if we have a landscape (6x4) or portrait (4x6) orientation
+        if side1_dist > side2_dist:
+            # Landscape: longer horizontal edge = 6 swatches wide, 4 tall
+            orientation = '6x4'
+            sw_w = int(swatch_width / 6)
+            sw_h = int(swatch_height / 4)
+            print(f"[DEBUG] Detected 6x4 orientation (landscape)")
+        else:
+            # Portrait: longer vertical edge = 4 swatches wide, 6 tall  
+            orientation = '4x6'
+            sw_w = int(swatch_width / 4)
+            sw_h = int(swatch_height / 6)
+            print(f"[DEBUG] Detected 4x6 orientation (portrait)")
+        
+        # Now find the 6-swatch white-to-black gradient
+        best_rotation = 0
+        best_score = float('inf')
+        best_edge_name = None
+        
+        if orientation == '6x4':
+            # Check horizontal edges (6 swatches each)
+            edges = [
+                ('bottom', [(3, col) for col in range(6)]),
+                ('top', [(0, col) for col in range(5, -1, -1)])  # reversed for gradient direction
+            ]
+        else:  # 4x6
+            # Check vertical edges (6 swatches each)
+            edges = [
+                ('right', [(row, 3) for row in range(6)]),
+                ('left', [(row, 0) for row in range(5, -1, -1)])  # reversed for gradient direction
+            ]
+        
+        for edge_name, positions in edges:
+            lightness_values = []
+            for row, col in positions:
+                lightness = get_swatch_lightness(warped_image, row, col, sw_w, sw_h, padding)
+                lightness_values.append(lightness)
+            
+            valid_count = len([v for v in lightness_values if v is not None])
+            if valid_count == 6:
+                score = check_gradient_quality(lightness_values)
+                
+                if score < best_score:
+                    best_score = score
+                    best_edge_name = edge_name
+                    
+                    valid_lightness = [v for v in lightness_values if v is not None]
+                    print(f"[DEBUG] Best gradient found: {orientation} {edge_name} edge")
+                    print(f"[DEBUG] Lightness values: {[round(v, 1) for v in valid_lightness]}")
+                    print(f"[DEBUG] Score: {score}")
+        
+        # Calculate rotation needed
+        if orientation == '6x4':
+            if best_edge_name == 'bottom':
+                best_rotation = 0  # Already correct
+            elif best_edge_name == 'top':
+                best_rotation = 2  # 180° - flip top to bottom
+        else:  # 4x6
+            if best_edge_name == 'right':
+                best_rotation = 1  # 90° clockwise - right becomes bottom
+            elif best_edge_name == 'left':
+                best_rotation = 3  # 90° counterclockwise - left becomes bottom
+        
+        print(f"[DEBUG] Final rotation: {best_rotation} ({best_rotation * 90}°)")
+        return best_rotation
+
+    @staticmethod
+    def detect_chart_rotation(warped_image, swatch_width, swatch_height, padding):
+        """
+        Detect chart rotation by finding the white-to-black gradient in both 6x4 and 4x6 orientations.
+        
+        ColorChecker24 has a distinctive 6-swatch white-to-black gradient. We check both possible
+        orientations and all edges to find where this gradient exists, then calculate the
+        rotation needed to move it to the bottom row.
+        
+        Args:
+            warped_image: numpy array of the warped chart image
+            swatch_width: width of each swatch in pixels
+            swatch_height: height of each swatch in pixels
+            padding: padding around the chart
+            
+        Returns:
+            int: rotation needed in 90-degree steps (0, 1, 2, 3 for 0°, 90°, 180°, 270°)
+        """
+        
+        def get_swatch_lightness(image, row, col, sw_w, sw_h, pad):
+            """Extract average lightness from a swatch position"""
+            x_start = pad + col * sw_w + sw_w // 4
+            x_end = pad + col * sw_w + 3 * sw_w // 4
+            y_start = pad + row * sw_h + sw_h // 4
+            y_end = pad + row * sw_h + 3 * sw_h // 4
+            
+            # Bounds checking for image dimensions
+            img_h, img_w = image.shape[:2]
+            if x_end >= img_w or y_end >= img_h or x_start < 0 or y_start < 0:
+                return None
+            
+            # Extract center region of swatch to avoid edge artifacts
+            swatch_region = image[y_start:y_end, x_start:x_end]
+            if swatch_region.size == 0:
+                return None
+            
+            # Calculate perceptual lightness (Y in YUV)
+            avg_color = np.mean(swatch_region, axis=(0, 1))
+            return 0.299 * avg_color[0] + 0.587 * avg_color[1] + 0.114 * avg_color[2]
+        
+        def check_gradient_quality(lightness_values):
+            """
+            Check how well a sequence matches white-to-black gradient.
+            Returns a score where lower is better.
+            """
+            # Filter out None values and check length
+            valid_values = [v for v in lightness_values if v is not None]
+            if len(valid_values) != 6:  # We only care about 6-swatch gradients
+                return float('inf')
+            
+            # Calculate how much lightness decreases across the sequence
+            total_decrease = 0
+            violations = 0
+            
+            for i in range(len(valid_values) - 1):
+                diff = valid_values[i] - valid_values[i + 1]
+                if diff > 0:  # Decreasing (good)
+                    total_decrease += diff
+                else:  # Increasing (bad)
+                    violations += 1
+            
+            # Good gradient should have high total decrease and few violations
+            # Also check if we have sufficient contrast (white to black range)
+            lightness_range = max(valid_values) - min(valid_values)
+            
+            # Score: penalize violations heavily, reward total decrease and range
+            score = violations * 100 - total_decrease - lightness_range
+            
+            # Extra penalty if range is too small (not really white-to-black)
+            if lightness_range < 80:
+                score += 200
+                
+            return score
+        
+        # Test both 6x4 and 4x6 orientations to find the 6-swatch gradient
+        orientations = [
+            {
+                'name': '6x4',
+                'sw_w': int(swatch_width / 6),
+                'sw_h': int(swatch_height / 4),
+                'edges': [
+                    ('bottom', [(3, col) for col in range(6)]),           # Bottom row: 6 swatches
+                    ('top', [(0, col) for col in range(5, -1, -1)]),     # Top row: 6 swatches (reversed)
+                    ('right', [(row, 5) for row in range(4)]),           # Right col: 4 swatches 
+                    ('left', [(row, 0) for row in range(3, -1, -1)])     # Left col: 4 swatches (reversed)
+                ]
+            },
+            {
+                'name': '4x6',
+                'sw_w': int(swatch_width / 4),
+                'sw_h': int(swatch_height / 6),
+                'edges': [
+                    ('bottom', [(5, col) for col in range(4)]),          # Bottom row: 4 swatches
+                    ('top', [(0, col) for col in range(3, -1, -1)]),     # Top row: 4 swatches (reversed)
+                    ('right', [(row, 3) for row in range(6)]),           # Right col: 6 swatches
+                    ('left', [(row, 0) for row in range(5, -1, -1)])     # Left col: 6 swatches (reversed)
+                ]
+            }
+        ]
+        
+        best_rotation = 0
+        best_score = float('inf')
+        
+        for orientation in orientations:
+            sw_w = orientation['sw_w']
+            sw_h = orientation['sw_h']
+            
+            for edge_name, positions in orientation['edges']:
+                # Extract lightness values for this edge
+                lightness_values = []
+                for row, col in positions:
+                    lightness = get_swatch_lightness(warped_image, row, col, sw_w, sw_h, padding)
+                    lightness_values.append(lightness)
+                
+                # Only consider edges with 6 valid swatches (the gradient we're looking for)
+                valid_count = len([v for v in lightness_values if v is not None])
+                if valid_count == 6:
+                    score = check_gradient_quality(lightness_values)
+                    
+                    if score < best_score:
+                        best_score = score
+
+                        # Calculate rotation needed to move this edge to bottom
+                        if orientation['name'] == '6x4':
+                            # For 6x4 orientation, we want the 6-swatch edge at bottom
+                            if edge_name == 'bottom':
+                                best_rotation = 0  # Already correct
+                            elif edge_name == 'top':
+                                best_rotation = 2  # 180° - flip top to bottom
+                            elif edge_name == 'right':
+                                best_rotation = 1  # 90° clockwise - right becomes bottom
+                            elif edge_name == 'left':
+                                best_rotation = 3  # 90° counterclockwise - left becomes bottom
+                        else:  # 4x6 orientation
+                            # For 4x6 orientation, the 6-swatch edges are on left/right
+                            # We need to rotate to make it a horizontal bottom edge
+                            if edge_name == 'right':
+                                best_rotation = 1  # 90° clockwise - right becomes bottom
+                            elif edge_name == 'left':
+                                best_rotation = 3  # 90° counterclockwise - left becomes bottom
+                            # Note: bottom/top edges in 4x6 only have 4 swatches, so they won't be selected
+
+        
+        return best_rotation
+
+    @staticmethod
     def perform_flatten_transform(main_window):
         """
         Executes perspective warp and grid overlay after four corner points are set.
+        Now includes automatic rotation detection to ensure proper ColorChecker orientation.
         
         Args:
             main_window: Reference to the main application window
@@ -488,8 +758,21 @@ class ChartTools:
 
         PADDING = 600
         pts_src = np.array(main_window.corner_points, dtype=np.float32)
-        width = np.linalg.norm(pts_src[1] - pts_src[0])
-        height = int(width * 9.0 / 14.0)
+        
+        # Calculate initial dimensions based on corner points
+        side1_dist = np.linalg.norm(pts_src[1] - pts_src[0])  # top edge
+        side2_dist = np.linalg.norm(pts_src[2] - pts_src[1])  # right edge
+        
+        # Determine the actual chart orientation from corner distances
+        if side1_dist > side2_dist:
+            # Landscape: 6x4 orientation - use standard ColorChecker proportions
+            width = side1_dist
+            height = int(width * 9.0 / 14.0)
+        else:
+            # Portrait: 4x6 orientation - swap the proportions
+            height = side1_dist  # The "longer" side becomes height
+            width = int(height * 14.0 / 9.0)  # Derive width from height
+        
         dst_pts = np.array([
             [PADDING, PADDING], [PADDING+width, PADDING],
             [PADDING+width, PADDING+height], [PADDING, PADDING+height]
@@ -510,23 +793,56 @@ class ChartTools:
         M = cv2.getPerspectiveTransform(pts_src_p, dst_pts)
         warped = cv2.warpPerspective(arr_p, M, (int(width+2*PADDING), int(height+2*PADDING)))
 
+        # Detect chart rotation using corner point distances to determine orientation
+        rotation_needed = ChartTools.detect_chart_rotation_from_corners(main_window.corner_points, warped, width, height, PADDING)
+        
+        if rotation_needed > 0:
+            main_window.log(f"[Flatten] Detected chart rotation, correcting by {rotation_needed * 90}°")
+            
+            # Apply rotation to warped image
+            if rotation_needed == 1:  # 90° clockwise
+                warped = cv2.rotate(warped, cv2.ROTATE_90_CLOCKWISE)
+            elif rotation_needed == 2:  # 180°
+                warped = cv2.rotate(warped, cv2.ROTATE_180)
+            elif rotation_needed == 3:  # 270° clockwise (90° counterclockwise)
+                warped = cv2.rotate(warped, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        else:
+            main_window.log("[Flatten] Chart orientation is correct")
+
         # Display warped image
         q2 = QImage(warped.data, warped.shape[1], warped.shape[0], warped.shape[1]*3,
                     QImage.Format_RGB888)
         main_window._display_preview(QPixmap.fromImage(q2))
 
-        # Draw swatch grid and update fp array
-        swatch_rect = QRect(PADDING, PADDING, int(width), int(height))
+        # Draw swatch grid - adjust dimensions if we rotated 90° or 270°
+        if rotation_needed == 1 or rotation_needed == 3:
+            # 90° or 270° rotation swaps width and height
+            swatch_rect = QRect(PADDING, PADDING, int(height), int(width))
+        else:
+            # 0° or 180° rotation keeps original dimensions
+            swatch_rect = QRect(PADDING, PADDING, int(width), int(height))
+            
         main_window.flatten_swatch_rects = ChartTools.draw_colorchecker_swatch_grid(
             main_window.previewScene, swatch_rect, n_cols=6, n_rows=4)
 
-        # Transform float-precision data
+        # Transform float-precision data with same rotation
         fparr = cv2.copyMakeBorder(main_window.cropped_fp, PADDING, PADDING, PADDING, PADDING,
                                    borderType=cv2.BORDER_REFLECT)
-        main_window.cropped_fp = cv2.warpPerspective(fparr.astype(np.float32), M,
+        cropped_fp_warped = cv2.warpPerspective(fparr.astype(np.float32), M,
                                               (warped.shape[1], warped.shape[0]))
+        
+        # Apply same rotation to float-precision data
+        if rotation_needed > 0:
+            if rotation_needed == 1:
+                cropped_fp_warped = cv2.rotate(cropped_fp_warped, cv2.ROTATE_90_CLOCKWISE)
+            elif rotation_needed == 2:
+                cropped_fp_warped = cv2.rotate(cropped_fp_warped, cv2.ROTATE_180)
+            elif rotation_needed == 3:
+                cropped_fp_warped = cv2.rotate(cropped_fp_warped, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        
+        main_window.cropped_fp = cropped_fp_warped
         main_window.flatten_mode = False
-        main_window.instruction_label.setText(
+        main_window.ui.chartInformationLabel.setText(
             "Please Run Detect Chart or Revert image to select new region")
         main_window.ui.finalizeChartPushbutton.setEnabled(True)
         
@@ -535,7 +851,6 @@ class ChartTools:
             main_window.preview_manual_swatch_correction()
         except Exception as e:
             main_window.log(f"[Flatten] Preview error: {e}")
-            # Continue without preview - not critical for functionality
     
     @staticmethod
     def draw_colorchecker_swatch_grid(scene, image_rect, n_cols=6, n_rows=4, color=QColor(0, 255, 0, 90)):
