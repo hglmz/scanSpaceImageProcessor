@@ -50,10 +50,12 @@ class LogLevel(IntEnum):
     DEBUG = 10     # Debug information for troubleshooting
     TRACE = 5      # Detailed trace information
 
-# Code to get taskbar icon visible
-import ctypes
-scanSpaceImageProcessor = u'mycompany.myproduct.subproduct.version' # arbitrary string to trick windows
-ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(scanSpaceImageProcessor)
+# Code to get taskbar icon visible (Windows only)
+import platform
+if platform.system() == 'Windows':
+    import ctypes
+    scanSpaceImageProcessor = u'mycompany.myproduct.subproduct.version' # arbitrary string to trick windows
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(scanSpaceImageProcessor)
 
 # supported file formats
 RAW_EXTENSIONS = ('.nef', '.cr2', '.cr3', '.dng', '.arw', '.raw')

@@ -19,7 +19,6 @@ oiio-python>=3.0.8.1.1
 
 # System monitoring and utilities
 psutil>=5.9.5
-pywin32>=306
 
 # Mathematics and scientific computing
 sympy>=1.13.0
