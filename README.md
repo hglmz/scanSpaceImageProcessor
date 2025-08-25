@@ -1,3 +1,24 @@
+## Experimental: Negative Film Mode (Repurposing)
+
+This repository has been repurposed/extended to support DSLR-scanned colour negatives while preserving the original photogrammetry workflow. The new Negative Film Mode is currently in progress and experimental.
+
+- What it does: Automatically inverts DSLR-scanned film negatives using robust per-channel percentile normalization to approximate orange mask removal and dynamic range mapping. The positive result is then compatible with the existing ColorChecker-based colour correction workflow.
+- Status: In progress (experimental). Behaviour, defaults, and UI may evolve.
+- How to use:
+  1. Open the app (`python image_space.py`).
+  2. Open Settings and enable “Enable Negative Film Mode (auto invert)”.
+  3. Load RAWs captured from negatives that include a ColorChecker in frame.
+  4. If automatic chart detection struggles, use “Manually Select Chart” and mark 4 corners, then “Flatten” and “Finalize Chart”.
+  5. Run batch processing as usual; colour correction will operate on the inverted (positive) image.
+- Notes:
+  - The auto-inversion is designed to be fast and robust for previews and batch runs. More advanced film workflows (e.g., base sampling UI, stock-specific profiles) may be added later.
+  - Original features and workflows remain unchanged when this mode is disabled.
+
+Türkçe Not:
+- Bu proje, mevcut işlevler korunarak DSLR ile taranmış negatif filmler için “Negatif Film Modu” ile yeniden amaçlandırılmıştır. Özellik şu an deneyseldir ve geliştirme aşamasındadır.
+
+---
+
 # Image Space
 
 A powerful desktop application for automated X-Rite/Calibrite colour checker calibration and batch colour correction of RAW camera images from photogrammetry datasets. Features distributed client/server processing, real-time image adjustments, and professional-grade colour correction workflows.
@@ -234,24 +255,6 @@ Use flexible naming schemas with variables:
 - Monitor memory usage during large batch processing
 
 **Color Correction Problems**
-- Ensure ColorChecker chart is well-lit and visible
-- Try manual chart selection for difficult lighting conditions or charts on odd angles
-- Check that all images in a group use the same lighting setup
-## Experimental: Negative Film Mode (Repurposing)
-
-This repository has been repurposed/extended to support DSLR-scanned colour negatives while preserving the original photogrammetry workflow. The new Negative Film Mode is currently in progress and experimental.
-
-- What it does: Automatically inverts DSLR-scanned film negatives using robust per-channel percentile normalization to approximate orange mask removal and dynamic range mapping. The positive result is then compatible with the existing ColorChecker-based colour correction workflow.
-- Status: In progress (experimental). Behaviour, defaults, and UI may evolve.
-- How to use:
-  1. Open the app (`python image_space.py`).
-  2. Open Settings and enable “Enable Negative Film Mode (auto invert)”.
-  3. Load RAWs captured from negatives that include a ColorChecker in frame.
-  4. If automatic chart detection struggles, use “Manually Select Chart” and mark 4 corners, then “Flatten” and “Finalize Chart”.
-  5. Run batch processing as usual; colour correction will operate on the inverted (positive) image.
-- Notes:
-  - The auto-inversion is designed to be fast and robust for previews and batch runs. More advanced film workflows (e.g., base sampling UI, stock-specific profiles) may be added later.
-  - Original features and workflows remain unchanged when this mode is disabled.
-
-Türkçe Not:
-- Bu proje, mevcut işlevler korunarak DSLR ile taranmış negatif filmler için “Negatif Film Modu” ile yeniden amaçlandırılmıştır. Özellik şu an deneyseldir ve geliştirme aşamasındadır.
+ - Ensure ColorChecker chart is well-lit and visible
+ - Try manual chart selection for difficult lighting conditions or charts on odd angles
+ - Check that all images in a group use the same lighting setup
