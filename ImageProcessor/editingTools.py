@@ -281,6 +281,89 @@ def _should_use_ultra_fast_mode(image: np.ndarray) -> bool:
 # COLOR SPACE CONVERSION UTILITIES
 # =============================================================================
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Negative Film Support (Auto-Inversion)
+#
+# These helpers are part of the project repurposing for DSLR-scanned film
+# negatives. They estimate film base (orange mask) and dynamic range per
+# channel using robust percentiles, normalize, and invert to obtain a
+# positive-looking image that downstream color-correction can work with.
+#
+# The approach is intentionally conservative and fast for previews and batch
+# processing. Further refinements (profile-specific curves, mask sampling UI)
+# may be added in future iterations.
+# ─────────────────────────────────────────────────────────────────────────────
+def invert_negative_auto(
+    image: np.ndarray,
+    low_percentile: float = 0.05,
+    high_percentile: float = 0.995,
+) -> np.ndarray:
+    """
+    Convert a camera-captured colour negative to positive by estimating
+    film orange mask and dynamic range via per-channel percentiles, then inverting.
+
+    Steps (per channel):
+    1) Estimate film base and white point using percentiles (robust to outliers)
+    2) Normalize: (x - p_low) / (p_high - p_low)
+    3) Invert: 1 - normalized
+
+    Args:
+        image: float32 RGB array in [0,1]
+        low_percentile: Lower percentile for base estimation (0..1)
+        high_percentile: Upper percentile for white point estimation (0..1)
+
+    Returns:
+        np.ndarray: Positive image (float32, [0,1]) suitable for standard workflows
+    """
+    if image is None or image.ndim != 3 or image.shape[2] != 3:
+        return image
+
+    img = np.clip(image.astype(np.float32), 0.0, 1.0)
+
+    # Subsample for fast percentile computation on large frames
+    h, w, _ = img.shape
+    step = max(1, int(np.sqrt((h * w) / 250_000)))  # target ~250k samples
+    sample = img[::step, ::step, :]
+
+    # Compute per-channel percentiles (robust to highlights/dust)
+    p_low = np.percentile(sample.reshape(-1, 3), low_percentile * 100.0, axis=0)
+    p_high = np.percentile(sample.reshape(-1, 3), high_percentile * 100.0, axis=0)
+
+    # Avoid degenerate ranges
+    denom = np.maximum(p_high - p_low, 1e-3)
+
+    # Apply channel-wise normalization and inversion
+    out = (img - p_low[None, None, :]) / denom[None, None, :]
+    out = 1.0 - np.clip(out, 0.0, 1.0)
+    return out
+
+def ensure_positive_if_negative(
+    image: np.ndarray,
+    enabled: bool = False,
+    low_percentile: float = 0.05,
+    high_percentile: float = 0.995,
+) -> np.ndarray:
+    """
+    Convenience wrapper: if negative mode enabled, auto-invert using
+    percentile normalization. Otherwise, pass-through.
+
+    Args:
+        image: float32 RGB array in [0,1]
+        enabled: If True, applies invert_negative_auto
+        low_percentile: Lower percentile for base
+        high_percentile: Upper percentile for white
+
+    Returns:
+        np.ndarray
+    """
+    if not enabled:
+        return image
+    try:
+        return invert_negative_auto(image, low_percentile, high_percentile)
+    except Exception:
+        # Fail-safe: return original image if anything goes wrong
+        return image
+
 def _rgb_to_lab(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert RGB image to LAB color space.

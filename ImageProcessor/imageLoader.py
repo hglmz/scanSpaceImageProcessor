@@ -23,6 +23,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QGraphicsPixmapItem
 import colour
 from colour import RGB_COLOURSPACES
+from ImageProcessor.editingTools import ensure_positive_if_negative
 
 # Supported file formats
 RAW_EXTENSIONS = ('.nef', '.cr2', '.cr3', '.dng', '.arw', '.raw')
@@ -182,11 +183,14 @@ class ImageLoader:
     
     @staticmethod
     def load_thumbnail_array(path, max_size=(512, 512), cache=None, chart_swatches=None, 
-                           correct_thumbnails=False, log_callback=None):
+                           correct_thumbnails=False, log_callback=None,
+                           negative_mode: bool = False):
         """
         Loads an image and creates a small thumbnail as a NumPy RGB array, for fast preview or stats.
         Supports fallback for RAW files using rawpy if PIL fails.
-        
+            negative_mode: If True, auto-invert DSLR-scanned negatives for preview
+                           (repurposing feature; applies a percentile-based inversion)
+            
         Args:
             path: Path to the image file
             max_size: Maximum dimensions for thumbnail (width, height)
@@ -212,6 +216,9 @@ class ImageLoader:
             with Image.open(path) as img:
                 img.thumbnail(max_size)
                 arr = np.asarray(img, dtype=np.float32) / 255.0
+                # Apply negative inversion if requested
+                if negative_mode:
+                    arr = ensure_positive_if_negative(arr, enabled=True)
                 
                 # Apply color correction if requested
                 if chart_swatches is not None and correct_thumbnails:
@@ -237,6 +244,9 @@ class ImageLoader:
             if ext in RAW_EXTENSIONS:
                 try:
                     arr = ImageLoader._load_raw_thumbnail(path, max_size, log_callback)
+                    if arr is not None and negative_mode:
+                        # Experimental repurposing: show negatives as positives in UI
+                        arr = ensure_positive_if_negative(arr, enabled=True)
                     if arr is not None and cache:
                         cache[path] = cache.get(path, {})
                         cache[path]['array'] = arr

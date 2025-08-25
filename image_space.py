@@ -180,6 +180,19 @@ class ImageProcessorSettingsDialog(QDialog):
         
         # Setup export schema validation and preview
         self._setup_export_schema_validation()
+
+        # Dynamically add Negative Film Mode checkbox to General tab
+        # Repurposing note: This toggle enables the experimental auto-inversion
+        # for DSLR-scanned film negatives. It keeps original workflows intact
+        # when disabled.
+        try:
+            from PySide6.QtWidgets import QCheckBox, QLabel
+            self.enableNegativeModeCheckbox = QCheckBox("Enable Negative Film Mode (auto invert)")
+            # Find a reasonable spot in the layout
+            self.ui.applicationGeneralGridLayout.addWidget(QLabel("Negative Film"), 6, 0)
+            self.ui.applicationGeneralGridLayout.addWidget(self.enableNegativeModeCheckbox, 6, 1, 1, 2)
+        except Exception:
+            self.enableNegativeModeCheckbox = None
     
     def _on_log_level_changed(self, index):
         """Handle log level combo box changes."""
@@ -230,6 +243,7 @@ class ImageProcessorSettingsDialog(QDialog):
         chart_folder_path = settings.value('chart_folder_path', '', type=str)
         correct_thumbnails = settings.value('correct_thumbnails', False, type=bool)
         log_level = settings.value('log_level', LogLevel.INFO, type=int)
+        negative_mode = settings.value('negative_mode_enabled', False, type=bool)
         
         # Load import/export settings
         look_in_subfolders = settings.value('look_in_subfolders', False, type=bool)
@@ -257,6 +271,8 @@ class ImageProcessorSettingsDialog(QDialog):
         self.ui.displayLogCheckBox.setChecked(display_log)
         self.ui.defaultThreadCountSpinbox.setValue(thread_count)
         self.ui.colorCorrectThumbnailsCheckbox.setChecked(correct_thumbnails)
+        if self.enableNegativeModeCheckbox is not None:
+            self.enableNegativeModeCheckbox.setChecked(negative_mode)
         
         # Set log level combo box
         if hasattr(self.ui, 'logDebugDepthCombobox'):
@@ -322,6 +338,9 @@ class ImageProcessorSettingsDialog(QDialog):
         settings.setValue('use_precalculated_charts', self.ui.usePrecalculatedChartsCheckBox.isChecked())
         settings.setValue('chart_folder_path', self.ui.chartFolderPathLineEdit.text())
         settings.setValue('correct_thumbnails', self.ui.colorCorrectThumbnailsCheckbox.isChecked())
+        # Save negative film mode
+        if self.enableNegativeModeCheckbox is not None:
+            settings.setValue('negative_mode_enabled', self.enableNegativeModeCheckbox.isChecked())
         
         # Save network settings
         if hasattr(self.ui, 'hostServerAddressLineEdit'):
@@ -3198,11 +3217,17 @@ IMAGE ADJUSTMENTS:"""
         
         # Load pixmap
         self.log_debug(f"[Preview Thumbnail] Loading image from: {path}, exists: {os.path.exists(path)}")
+        # Read Negative Film Mode from settings for preview rendering
+        # (repurposing: invert negatives for on-screen previews)
+        settings = QSettings('ScanSpace', 'ImageProcessor')
+        negative_mode = settings.value('negative_mode_enabled', False, type=bool)
+
         pixmap = ImageLoader.create_pixmap_from_path(
-            path, cache=self.thumbnail_cache, 
+            path, cache=self.thumbnail_cache,
             chart_swatches=self.chart_swatches,
-            correct_thumbnails=self.correct_thumbnails, 
-            log_callback=self.log_debug
+            correct_thumbnails=self.correct_thumbnails,
+            log_callback=self.log_debug,
+            negative_mode=negative_mode,
         )
         
         if not pixmap or pixmap.isNull():
@@ -3427,6 +3452,10 @@ IMAGE ADJUSTMENTS:"""
                 denoise_strength = self.ui.denoiseDoubleSpinBox.value() if self.ui.denoiseImageCheckBox.isChecked() else 0.0
                 sharpen_amount = self.ui.sharpenDoubleSpinBox.value() if self.ui.sharpenImageCheckBox.isChecked() else 0.0
                 
+                # Negative Film Mode (from settings)
+                settings = QSettings('ScanSpace', 'ImageProcessor')
+                negative_mode = settings.value('negative_mode_enabled', False, type=bool)
+
                 worker = ImageCorrectionWorker(
                     chunk, swatches, outf, sig, qual, rename_map,
                     name_base=name_base, padding=padding,
@@ -3437,7 +3466,8 @@ IMAGE ADJUSTMENTS:"""
                     use_chart=use_chart, exposure_adj=exposure_adj,
                     shadow_adj=shadow_adj, highlight_adj=highlight_adj,
                     white_balance_adj=white_balance_adj, denoise_strength=denoise_strength,
-                    sharpen_amount=sharpen_amount
+                    sharpen_amount=sharpen_amount,
+                    negative_mode=negative_mode
                 )
 
                 shadow_limit = self.ui.shadowLimitSpinBox.value() / 100.0

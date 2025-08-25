@@ -32,7 +32,7 @@ from ImageProcessor.fileNamingSchema import apply_naming_schema
 # Import EXIF copy module
 from ImageProcessor.copyExif import ExifCopyManager
 # Import image editing tools
-from ImageProcessor.editingTools import apply_all_adjustments
+from ImageProcessor.editingTools import apply_all_adjustments, ensure_positive_if_negative
 
 # supported file formats
 RAW_EXTENSIONS = ('.nef', '.cr2', '.cr3', '.dng', '.arw', '.raw')
@@ -210,7 +210,14 @@ class ImageCorrectionWorker(QRunnable):
                  use_chart: bool = True, exposure_adj: float = 0.0,
                  shadow_adj: float = 0.0, highlight_adj: float = 0.0, 
                  white_balance_adj: int = 5500, denoise_strength: float = 0.0,
-                 sharpen_amount: float = 0.0):
+                 sharpen_amount: float = 0.0,
+                 # Negative film repurposing options (experimental)
+                 # If enabled, the RAW -> RGB result is auto-inverted using
+                 # percentile-based normalization to approximate orange mask
+                 # removal before downstream color correction.
+                 negative_mode: bool = False,
+                 negative_low_pct: float = 0.05,
+                 negative_high_pct: float = 0.995):
         super().__init__()
         self.images = images
         self.swatches = swatches
@@ -243,6 +250,11 @@ class ImageCorrectionWorker(QRunnable):
         self.white_balance_adj = white_balance_adj
         self.denoise_strength = denoise_strength
         self.sharpen_amount = sharpen_amount
+
+        # Negative film processing options
+        self.negative_mode = negative_mode
+        self.negative_low_pct = negative_low_pct
+        self.negative_high_pct = negative_high_pct
 
         # EXIF copy manager for thread-safe metadata operations
         self.exif_manager = ExifCopyManager()
@@ -301,6 +313,15 @@ class ImageCorrectionWorker(QRunnable):
             raw_img_float = np.array(rgb, dtype=np.float32) / 65535.0
             del rgb  # Delete rgb array after conversion
             gc.collect()
+            # Apply negative -> positive conversion if enabled
+            # Experimental repurposing: convert DSLR-scanned negatives to positive.
+            # This makes subsequent ColorChecker-based correction meaningful.
+            raw_img_float = ensure_positive_if_negative(
+                raw_img_float,
+                enabled=self.negative_mode,
+                low_percentile=self.negative_low_pct,
+                high_percentile=self.negative_high_pct,
+            )
             return raw_img_float
 
     def apply_colour_correction(self, img_array: np.ndarray) -> np.ndarray:
