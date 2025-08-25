@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsPixmapItem, QLabel, QRubberBand, QWidget, QGraphicsView, QDialog, QProgressDialog
 )
 from PySide6.QtCore import (
-    QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, Slot, QPropertyAnimation, QEasingCurve, QThread, QMetaObject
+    QRunnable, QThreadPool, Signal, QObject, QTimer, Qt, QSettings, QEvent, QRect, Slot, QPropertyAnimation, QEasingCurve, QThread, QMetaObject, Property
 )
 from PySide6.QtGui import QColor, QPixmap, QImage, QPainter, QIcon, QCursor, QTransform, QBrush, QKeySequence, QAction
 
@@ -570,7 +570,7 @@ class LoadingSpinner(QLabel):
         self.rotation_angle = angle
         self._render_rotated_pixmap(angle)
     
-    # Property for animation
+    # Qt Property for animation
     def get_rotation(self):
         return self.rotation_angle
     
@@ -578,7 +578,7 @@ class LoadingSpinner(QLabel):
         self.rotation_angle = angle
         self._render_rotated_pixmap(angle)
     
-    rotation = property(get_rotation, set_rotation)
+    rotation = Property(float, fget=get_rotation, fset=set_rotation)
     
     def start_spinning(self):
         """Start the spinning animation."""
@@ -620,10 +620,15 @@ class MainWindow(QMainWindow):
         # 2) Application Icon & Settings
         # ────────────────────────────────────────────────────────────
         self.settings = QSettings('scanSpace', 'ImageProcessor')
-        icon_path = "./resources/imageSpace_logo.ico"
+        # Get the absolute path to the icon file relative to this script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(script_dir, "resources", "imageSpace_logo.ico")
         if os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
-            self.setWindowIcon(QIcon(pixmap))
+            icon = QIcon(icon_path)
+            self.setWindowIcon(icon)
+            # Also set the application icon for the dock/taskbar
+            QApplication.instance().setWindowIcon(icon)
+            print(f"Icon loaded from: {icon_path}")
         else:
             print(f"Icon file not found at: {icon_path}")
 
@@ -928,6 +933,12 @@ class MainWindow(QMainWindow):
         
         # Load and apply settings from INI file
         self.apply_settings()
+        
+        # Connect quit action if it exists
+        if hasattr(self.ui, 'actionQuit'):
+            self.ui.actionQuit.triggered.connect(self.close)
+            # Add keyboard shortcut for quit (Cmd+Q on Mac, Ctrl+Q on others)
+            self.ui.actionQuit.setShortcut(QKeySequence.StandardKey.Quit)
     
     def switch_theme(self, theme_name):
         """Switch to the specified theme."""
@@ -1046,6 +1057,29 @@ class MainWindow(QMainWindow):
             self.switch_theme('light')
         
         self.log_info("[Settings] Settings applied successfully")
+    
+    def closeEvent(self, event):
+        """Handle application close event - clean shutdown."""
+        # Stop any running timers
+        if hasattr(self, 'cpuTimer'):
+            self.cpuTimer.stop()
+        if hasattr(self, 'raw_load_timer'):
+            self.raw_load_timer.stop()
+        
+        # Clean up thread pool
+        if hasattr(self, 'threadpool'):
+            self.threadpool.waitForDone(1000)  # Wait max 1 second for threads
+        
+        # Save window state/geometry if needed
+        if hasattr(self, 'settings'):
+            # You could save window geometry here if desired
+            pass
+        
+        # Accept the close event
+        event.accept()
+        
+        # Ensure application quits
+        QApplication.instance().quit()
 
     def load_default_color_chart(self, chart_path):
         """

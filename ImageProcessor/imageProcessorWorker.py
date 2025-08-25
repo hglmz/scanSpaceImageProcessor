@@ -3,6 +3,7 @@ import os
 import time
 import threading
 from pathlib import Path
+import platform
 
 import cv2
 import numpy as np
@@ -11,7 +12,9 @@ import imageio
 import colour
 import tempfile
 
-import win32wnet
+# Windows-specific imports
+if platform.system() == 'Windows':
+    import win32wnet
 from OpenImageIO import ImageBuf, ImageBufAlgo, ImageSpec, ImageOutput, TypeFloat, ColorConfig, ROI, ImageInput, \
     TypeDesc, TypeUInt8
 from PySide6.QtCore import (
@@ -128,6 +131,10 @@ def simple_unc_to_drive_conversion(unc_path: str) -> str:
     Only converts if we can find an exact drive mapping, otherwise returns original.
     """
     if not unc_path or not unc_path.startswith('\\\\'):
+        return unc_path
+    
+    # Only attempt conversion on Windows
+    if platform.system() != 'Windows':
         return unc_path
     
     try:
